@@ -32,10 +32,35 @@ func (s *Service) ParseJobDescription(jobDescription string) (*domain.JobInsight
 }
 
 func (s *Service) GenerateQuestions(resumeText, jobDescription string) ([]domain.GeneratedQuestion, error) {
-	return []domain.GeneratedQuestion{
-		{Type: "behavioral", Question: "Tell me about yourself and your most relevant experience."},
-		{Type: "technical", Question: "Describe one technical problem you solved recently and your approach."},
-	}, nil
+	resumeTokens := topKeywords(tokenize(strings.ToLower(resumeText)), 6)
+	jobTokens := topKeywords(tokenize(strings.ToLower(jobDescription)), 6)
+
+	primaryResume := pickOrDefault(resumeTokens, 0, "your background")
+	secondaryResume := pickOrDefault(resumeTokens, 1, "a key project")
+	primaryJob := pickOrDefault(jobTokens, 0, "this role")
+	secondaryJob := pickOrDefault(jobTokens, 1, "the main responsibilities")
+
+	behavioral := []domain.GeneratedQuestion{
+		{Type: "behavioral", Question: "Tell me about a time you delivered impact related to " + primaryJob + "."},
+		{Type: "behavioral", Question: "Describe a challenge you faced while working on " + secondaryResume + " and how you solved it."},
+		{Type: "behavioral", Question: "Share an example of collaborating with others to achieve a difficult goal."},
+		{Type: "behavioral", Question: "How do you prioritize tasks when deadlines are tight and priorities change?"},
+		{Type: "behavioral", Question: "Describe a situation where you received critical feedback and what actions you took."},
+	}
+
+	technical := []domain.GeneratedQuestion{
+		{Type: "technical", Question: "Walk through a system or feature you built involving " + primaryResume + "."},
+		{Type: "technical", Question: "How would you design an API workflow for " + primaryJob + "?"},
+		{Type: "technical", Question: "What trade-offs would you consider when scaling a service handling " + secondaryJob + "?"},
+		{Type: "technical", Question: "Explain how you debug production issues in distributed systems."},
+		{Type: "technical", Question: "How do you ensure reliability, observability, and performance in backend services?"},
+	}
+
+	questions := make([]domain.GeneratedQuestion, 0, len(behavioral)+len(technical))
+	questions = append(questions, behavioral...)
+	questions = append(questions, technical...)
+
+	return questions, nil
 }
 
 func (s *Service) AnalyzeAnswer(question, answer string) (*domain.AnswerAnalysis, error) {
@@ -178,4 +203,11 @@ func detectSeniority(input string) string {
 		return "junior"
 	}
 	return "unspecified"
+}
+
+func pickOrDefault(values []string, idx int, fallback string) string {
+	if idx >= 0 && idx < len(values) && strings.TrimSpace(values[idx]) != "" {
+		return values[idx]
+	}
+	return fallback
 }
