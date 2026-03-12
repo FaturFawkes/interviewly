@@ -2,6 +2,8 @@ package usecase
 
 import (
 	"errors"
+	"math"
+	"sort"
 	"strings"
 
 	"github.com/interview_app/backend/internal/domain"
@@ -144,5 +146,89 @@ func (uc *interviewUseCase) GenerateFeedback(userID, sessionID, questionID, ques
 		return nil, err
 	}
 
-	return uc.repo.SaveFeedback(userID, sessionID, questionID, question, answer, analysis)
+	feedback, err := uc.repo.SaveFeedback(userID, sessionID, questionID, question, answer, analysis)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, aggregateErr := uc.AggregateProgress(userID); aggregateErr != nil {
+		return nil, aggregateErr
+	}
+
+	return feedback, nil
+}
+
+func (uc *interviewUseCase) AggregateProgress(userID string) (*domain.ProgressMetrics, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errors.New("user id is required")
+	}
+
+	feedbackItems, err := uc.repo.ListFeedbackByUser(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(feedbackItems) == 0 {
+		return uc.repo.SaveProgressMetrics(userID, 0, []string{}, 0)
+	}
+
+	sum := 0
+	sessionSet := make(map[string]struct{})
+	weakCount := make(map[string]int)
+
+	for _, item := range feedbackItems {
+		sum += item.Score
+		sessionSet[item.SessionID] = struct{}{}
+		for _, weak := range item.Weaknesses {
+			key := strings.TrimSpace(strings.ToLower(weak))
+			if key == "" {
+				continue
+			}
+			weakCount[key]++
+		}
+	}
+
+	average := float64(sum) / float64(len(feedbackItems))
+	average = math.Round(average*100) / 100
+
+	weakAreas := topWeakAreas(weakCount, 3)
+	sessionsCompleted := len(sessionSet)
+
+	return uc.repo.SaveProgressMetrics(userID, average, weakAreas, sessionsCompleted)
+}
+
+func (uc *interviewUseCase) GetProgress(userID string) (*domain.ProgressMetrics, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errors.New("user id is required")
+	}
+	return uc.repo.GetProgressMetrics(userID)
+}
+
+func topWeakAreas(freq map[string]int, limit int) []string {
+	type entry struct {
+		value string
+		count int
+	}
+
+	list := make([]entry, 0, len(freq))
+	for value, count := range freq {
+		list = append(list, entry{value: value, count: count})
+	}
+
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].count == list[j].count {
+			return list[i].value < list[j].value
+		}
+		return list[i].count > list[j].count
+	})
+
+	if len(list) > limit {
+		list = list[:limit]
+	}
+
+	result := make([]string, 0, len(list))
+	for _, item := range list {
+		result = append(result, item.value)
+	}
+	return result
 }

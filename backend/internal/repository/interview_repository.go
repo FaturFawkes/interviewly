@@ -19,6 +19,7 @@ type interviewRepository struct {
 	sessions   map[string]domain.PracticeSession
 	answers    map[string]domain.SessionAnswer
 	feedbacks  map[string]domain.FeedbackRecord
+	progress   map[string]domain.ProgressMetrics
 }
 
 // NewInterviewRepository creates interview repository with postgres support and in-memory fallback.
@@ -31,6 +32,7 @@ func NewInterviewRepository(pool *pgxpool.Pool) domain.InterviewRepository {
 		sessions:   make(map[string]domain.PracticeSession),
 		answers:    make(map[string]domain.SessionAnswer),
 		feedbacks:  make(map[string]domain.FeedbackRecord),
+		progress:   make(map[string]domain.ProgressMetrics),
 	}
 }
 
@@ -393,4 +395,89 @@ func (r *interviewRepository) ListFeedbackByUser(userID string) ([]domain.Feedba
 		}
 	}
 	return result, nil
+}
+
+func (r *interviewRepository) SaveProgressMetrics(userID string, averageScore float64, weakAreas []string, sessionsCompleted int) (*domain.ProgressMetrics, error) {
+	updatedAt := time.Now().UTC()
+	metrics := &domain.ProgressMetrics{
+		UserID:            userID,
+		AverageScore:      averageScore,
+		WeakAreas:         append([]string{}, weakAreas...),
+		SessionsCompleted: sessionsCompleted,
+		UpdatedAt:         updatedAt,
+	}
+
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := r.pool.Exec(
+			ctx,
+			`INSERT INTO app_progress_metrics
+				(user_id, average_score, weak_areas, sessions_completed, updated_at)
+			 VALUES
+				($1, $2, $3, $4, $5)
+			 ON CONFLICT (user_id)
+			 DO UPDATE
+			    SET average_score = EXCLUDED.average_score,
+			        weak_areas = EXCLUDED.weak_areas,
+			        sessions_completed = EXCLUDED.sessions_completed,
+			        updated_at = EXCLUDED.updated_at`,
+			metrics.UserID,
+			metrics.AverageScore,
+			metrics.WeakAreas,
+			metrics.SessionsCompleted,
+			metrics.UpdatedAt,
+		)
+		if err == nil {
+			return metrics, nil
+		}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.progress[userID] = *metrics
+	return metrics, nil
+}
+
+func (r *interviewRepository) GetProgressMetrics(userID string) (*domain.ProgressMetrics, error) {
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var metrics domain.ProgressMetrics
+		err := r.pool.QueryRow(
+			ctx,
+			`SELECT user_id, average_score, weak_areas, sessions_completed, updated_at
+			   FROM app_progress_metrics
+			  WHERE user_id = $1`,
+			userID,
+		).Scan(
+			&metrics.UserID,
+			&metrics.AverageScore,
+			&metrics.WeakAreas,
+			&metrics.SessionsCompleted,
+			&metrics.UpdatedAt,
+		)
+		if err == nil {
+			return &metrics, nil
+		}
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	metrics, exists := r.progress[userID]
+	if !exists {
+		return &domain.ProgressMetrics{
+			UserID:            userID,
+			AverageScore:      0,
+			WeakAreas:         []string{},
+			SessionsCompleted: 0,
+			UpdatedAt:         time.Now().UTC(),
+		}, nil
+	}
+
+	copy := metrics
+	return &copy, nil
 }

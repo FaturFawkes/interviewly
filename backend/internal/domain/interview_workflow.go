@@ -75,6 +75,15 @@ type FeedbackRecord struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// ProgressMetrics stores aggregated user analytics for dashboard queries.
+type ProgressMetrics struct {
+	UserID            string    `json:"user_id"`
+	AverageScore      float64   `json:"average_score"`
+	WeakAreas         []string  `json:"weak_areas"`
+	SessionsCompleted int       `json:"sessions_completed"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
 // InterviewRepository defines data persistence required by interview workflows.
 type InterviewRepository interface {
 	SaveParsedJob(userID, rawDescription string, insights *JobInsights) (*ParsedJobDescription, error)
@@ -85,6 +94,8 @@ type InterviewRepository interface {
 	SaveSessionAnswer(userID, sessionID, questionID, answer string) (*SessionAnswer, error)
 	SaveFeedback(userID, sessionID, questionID, question, answer string, analysis *AnswerAnalysis) (*FeedbackRecord, error)
 	ListFeedbackByUser(userID string) ([]FeedbackRecord, error)
+	SaveProgressMetrics(userID string, averageScore float64, weakAreas []string, sessionsCompleted int) (*ProgressMetrics, error)
+	GetProgressMetrics(userID string) (*ProgressMetrics, error)
 }
 
 // InterviewUseCase defines interview workflows.
@@ -96,4 +107,6 @@ type InterviewUseCase interface {
 	ListPracticeSessions(userID string) ([]PracticeSession, error)
 	SubmitSessionAnswer(userID, sessionID, questionID, answer string) (*SessionAnswer, error)
 	GenerateFeedback(userID, sessionID, questionID, question, answer string) (*FeedbackRecord, error)
+	AggregateProgress(userID string) (*ProgressMetrics, error)
+	GetProgress(userID string) (*ProgressMetrics, error)
 }
