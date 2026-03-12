@@ -35,3 +35,14 @@ func (uc *interviewUseCase) ParseJobDescription(userID, rawDescription string) (
 
 	return uc.repo.SaveParsedJob(userID, rawDescription, insights)
 }
+
+func (uc *interviewUseCase) SaveResume(userID, content string) (*domain.ResumeRecord, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errors.New("user id is required")
+	}
+	if strings.TrimSpace(content) == "" {
+		return nil, errors.New("resume content is required")
+	}
+
+	return uc.repo.SaveResume(userID, content)
+}

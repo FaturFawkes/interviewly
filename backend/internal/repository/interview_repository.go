@@ -14,6 +14,7 @@ type interviewRepository struct {
 	pool       *pgxpool.Pool
 	mu         sync.RWMutex
 	parsedJobs map[string]*domain.ParsedJobDescription
+	resumes    map[string]*domain.ResumeRecord
 }
 
 // NewInterviewRepository creates interview repository with postgres support and in-memory fallback.
@@ -21,6 +22,7 @@ func NewInterviewRepository(pool *pgxpool.Pool) domain.InterviewRepository {
 	return &interviewRepository{
 		pool:       pool,
 		parsedJobs: make(map[string]*domain.ParsedJobDescription),
+		resumes:    make(map[string]*domain.ResumeRecord),
 	}
 }
 
@@ -62,4 +64,39 @@ func (r *interviewRepository) SaveParsedJob(userID, rawDescription string, insig
 	defer r.mu.Unlock()
 	r.parsedJobs[parsed.ID] = parsed
 	return parsed, nil
+}
+
+func (r *interviewRepository) SaveResume(userID, content string) (*domain.ResumeRecord, error) {
+	now := time.Now().UTC()
+	resume := &domain.ResumeRecord{
+		ID:        uuid.NewString(),
+		UserID:    userID,
+		Content:   content,
+		CreatedAt: now,
+	}
+
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := r.pool.Exec(
+			ctx,
+			`INSERT INTO app_resumes
+				(id, user_id, content, created_at)
+			 VALUES
+				($1, $2, $3, $4)`,
+			resume.ID,
+			resume.UserID,
+			resume.Content,
+			resume.CreatedAt,
+		)
+		if err == nil {
+			return resume, nil
+		}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.resumes[resume.ID] = resume
+	return resume, nil
 }
