@@ -41,11 +41,12 @@ func main() {
 	jobHandler := handler.NewJobHandler(interviewUC)
 	resumeHandler := handler.NewResumeHandler(interviewUC)
 	questionHandler := handler.NewQuestionHandler(interviewUC)
+	sessionHandler := handler.NewSessionHandler(interviewUC)
 	meHandler := handler.NewMeHandler()
 	authMiddleware := middleware.AuthMiddleware(cfg)
 
 	// Setup router
-	r := router.Setup(healthHandler, meHandler, jobHandler, resumeHandler, questionHandler, authMiddleware)
+	r := router.Setup(healthHandler, meHandler, jobHandler, resumeHandler, questionHandler, sessionHandler, authMiddleware)
 
 	addr := fmt.Sprintf(":%s", cfg.ServerPort)
 	log.Printf("Server starting on %s (env: %s)", addr, cfg.Env)

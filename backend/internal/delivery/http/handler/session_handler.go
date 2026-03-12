@@ -1,0 +1,53 @@
+package handler
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/interview_app/backend/internal/delivery/http/middleware"
+	"github.com/interview_app/backend/internal/domain"
+)
+
+type startSessionRequest struct {
+	ResumeID    string   `json:"resume_id" binding:"required"`
+	JobParseID  string   `json:"job_parse_id" binding:"required"`
+	QuestionIDs []string `json:"question_ids" binding:"required"`
+}
+
+// SessionHandler handles interview session APIs.
+type SessionHandler struct {
+	interviewUC domain.InterviewUseCase
+}
+
+func NewSessionHandler(interviewUC domain.InterviewUseCase) *SessionHandler {
+	return &SessionHandler{interviewUC: interviewUC}
+}
+
+// StartSession handles POST /api/session/start.
+func (h *SessionHandler) StartSession(c *gin.Context) {
+	var req startSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userIDValue, exists := c.Get(middleware.UserIDContextKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	userID, ok := userIDValue.(string)
+	if !ok || userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user context"})
+		return
+	}
+
+	session, err := h.interviewUC.CreatePracticeSession(userID, req.ResumeID, req.JobParseID, req.QuestionIDs)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, session)
+}
