@@ -48,7 +48,14 @@ func (h *QuestionHandler) GenerateQuestions(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"questions": questions,
-	})
+	}
+
+	if len(questions) > 0 {
+		response["resume_id"] = questions[0].ResumeID
+		response["job_parse_id"] = questions[0].JobParseID
+	}
+
+	c.JSON(http.StatusOK, response)
 }

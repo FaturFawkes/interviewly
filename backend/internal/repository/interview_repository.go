@@ -2,11 +2,13 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/interview_app/backend/internal/domain"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -161,6 +163,10 @@ func (r *interviewRepository) SaveGeneratedQuestions(userID, resumeID, jobParseI
 }
 
 func (r *interviewRepository) CreatePracticeSession(userID, resumeID, jobParseID string, questionIDs []string) (*domain.PracticeSession, error) {
+	if err := r.validateSessionCreationReferences(userID, resumeID, jobParseID, questionIDs); err != nil {
+		return nil, err
+	}
+
 	now := time.Now().UTC()
 	session := &domain.PracticeSession{
 		ID:          uuid.NewString(),
@@ -254,6 +260,10 @@ func (r *interviewRepository) ListPracticeSessions(userID string) ([]domain.Prac
 }
 
 func (r *interviewRepository) SaveSessionAnswer(userID, sessionID, questionID, answer string) (*domain.SessionAnswer, error) {
+	if err := r.validateSessionQuestionReference(userID, sessionID, questionID); err != nil {
+		return nil, err
+	}
+
 	now := time.Now().UTC()
 	record := &domain.SessionAnswer{
 		ID:         uuid.NewString(),
@@ -296,6 +306,10 @@ func (r *interviewRepository) SaveFeedback(
 	userID, sessionID, questionID, question, answer string,
 	analysis *domain.AnswerAnalysis,
 ) (*domain.FeedbackRecord, error) {
+	if err := r.validateSessionQuestionReference(userID, sessionID, questionID); err != nil {
+		return nil, err
+	}
+
 	now := time.Now().UTC()
 	record := &domain.FeedbackRecord{
 		ID:           uuid.NewString(),
@@ -480,4 +494,164 @@ func (r *interviewRepository) GetProgressMetrics(userID string) (*domain.Progres
 
 	copy := metrics
 	return &copy, nil
+}
+
+func (r *interviewRepository) validateSessionCreationReferences(userID, resumeID, jobParseID string, questionIDs []string) error {
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var exists bool
+
+		if err := r.pool.QueryRow(
+			ctx,
+			`SELECT EXISTS(SELECT 1 FROM app_resumes WHERE id = $1 AND user_id = $2)`,
+			resumeID,
+			userID,
+		).Scan(&exists); err == nil {
+			if !exists {
+				return errors.New("resume not found")
+			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+
+		if err := r.pool.QueryRow(
+			ctx,
+			`SELECT EXISTS(SELECT 1 FROM app_job_parses WHERE id = $1 AND user_id = $2)`,
+			jobParseID,
+			userID,
+		).Scan(&exists); err == nil {
+			if !exists {
+				return errors.New("job parse not found")
+			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+
+		for _, questionID := range questionIDs {
+			if err := r.pool.QueryRow(
+				ctx,
+				`SELECT EXISTS(
+					SELECT 1
+					  FROM app_questions
+					 WHERE id = $1 AND user_id = $2 AND resume_id = $3 AND job_parse_id = $4
+				)`,
+				questionID,
+				userID,
+				resumeID,
+				jobParseID,
+			).Scan(&exists); err == nil {
+				if !exists {
+					return errors.New("question not found for session")
+				}
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	resume, resumeExists := r.resumes[resumeID]
+	if !resumeExists || resume.UserID != userID {
+		return errors.New("resume not found")
+	}
+
+	job, jobExists := r.parsedJobs[jobParseID]
+	if !jobExists || job.UserID != userID {
+		return errors.New("job parse not found")
+	}
+
+	for _, questionID := range questionIDs {
+		question, questionExists := r.questions[questionID]
+		if !questionExists || question.UserID != userID || question.ResumeID != resumeID || question.JobParseID != jobParseID {
+			return errors.New("question not found for session")
+		}
+	}
+
+	return nil
+}
+
+func (r *interviewRepository) validateSessionQuestionReference(userID, sessionID, questionID string) error {
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var sessionUserID string
+		var questionIDs []string
+		err := r.pool.QueryRow(
+			ctx,
+			`SELECT user_id, question_ids FROM app_practice_sessions WHERE id = $1`,
+			sessionID,
+		).Scan(&sessionUserID, &questionIDs)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errors.New("session not found")
+			}
+			return err
+		}
+
+		if sessionUserID != userID {
+			return errors.New("session not found")
+		}
+
+		if !containsString(questionIDs, questionID) {
+			return errors.New("question not found for session")
+		}
+
+		var questionUserID string
+		err = r.pool.QueryRow(
+			ctx,
+			`SELECT user_id FROM app_questions WHERE id = $1`,
+			questionID,
+		).Scan(&questionUserID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errors.New("question not found")
+			}
+			return err
+		}
+
+		if questionUserID != userID {
+			return errors.New("question not found")
+		}
+
+		return nil
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	session, sessionExists := r.sessions[sessionID]
+	if !sessionExists || session.UserID != userID {
+		return errors.New("session not found")
+	}
+
+	if !containsString(session.QuestionIDs, questionID) {
+		return errors.New("question not found for session")
+	}
+
+	question, questionExists := r.questions[questionID]
+	if !questionExists || question.UserID != userID {
+		return errors.New("question not found")
+	}
+
+	if question.ResumeID != session.ResumeID || question.JobParseID != session.JobParseID {
+		return errors.New("question not found for session")
+	}
+
+	return nil
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
