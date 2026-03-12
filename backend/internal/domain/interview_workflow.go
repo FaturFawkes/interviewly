@@ -27,13 +27,13 @@ type ResumeRecord struct {
 
 // StoredQuestion represents one generated question persisted by backend.
 type StoredQuestion struct {
-	ID          string    `json:"id"`
-	UserID      string    `json:"user_id"`
-	ResumeID    string    `json:"resume_id"`
-	JobParseID  string    `json:"job_parse_id"`
-	Type        string    `json:"type"`
-	Question    string    `json:"question"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID         string    `json:"id"`
+	UserID     string    `json:"user_id"`
+	ResumeID   string    `json:"resume_id"`
+	JobParseID string    `json:"job_parse_id"`
+	Type       string    `json:"type"`
+	Question   string    `json:"question"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // PracticeSession represents one interview practice lifecycle.
@@ -59,6 +59,22 @@ type SessionAnswer struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+// FeedbackRecord stores generated AI feedback for an answer.
+type FeedbackRecord struct {
+	ID           string    `json:"id"`
+	UserID       string    `json:"user_id"`
+	SessionID    string    `json:"session_id"`
+	QuestionID   string    `json:"question_id"`
+	Question     string    `json:"question"`
+	Answer       string    `json:"answer"`
+	Score        int       `json:"score"`
+	Strengths    []string  `json:"strengths"`
+	Weaknesses   []string  `json:"weaknesses"`
+	Improvements []string  `json:"improvements"`
+	STARFeedback string    `json:"star_feedback"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
 // InterviewRepository defines data persistence required by interview workflows.
 type InterviewRepository interface {
 	SaveParsedJob(userID, rawDescription string, insights *JobInsights) (*ParsedJobDescription, error)
@@ -67,6 +83,8 @@ type InterviewRepository interface {
 	CreatePracticeSession(userID, resumeID, jobParseID string, questionIDs []string) (*PracticeSession, error)
 	ListPracticeSessions(userID string) ([]PracticeSession, error)
 	SaveSessionAnswer(userID, sessionID, questionID, answer string) (*SessionAnswer, error)
+	SaveFeedback(userID, sessionID, questionID, question, answer string, analysis *AnswerAnalysis) (*FeedbackRecord, error)
+	ListFeedbackByUser(userID string) ([]FeedbackRecord, error)
 }
 
 // InterviewUseCase defines interview workflows.
@@ -77,4 +95,5 @@ type InterviewUseCase interface {
 	CreatePracticeSession(userID, resumeID, jobParseID string, questionIDs []string) (*PracticeSession, error)
 	ListPracticeSessions(userID string) ([]PracticeSession, error)
 	SubmitSessionAnswer(userID, sessionID, questionID, answer string) (*SessionAnswer, error)
+	GenerateFeedback(userID, sessionID, questionID, question, answer string) (*FeedbackRecord, error)
 }

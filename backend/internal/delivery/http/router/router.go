@@ -13,6 +13,7 @@ func Setup(
 	resumeHandler *handler.ResumeHandler,
 	questionHandler *handler.QuestionHandler,
 	sessionHandler *handler.SessionHandler,
+	feedbackHandler *handler.FeedbackHandler,
 	authMiddleware gin.HandlerFunc,
 ) *gin.Engine {
 	r := gin.Default()
@@ -28,6 +29,7 @@ func Setup(
 	api.POST("/questions/generate", questionHandler.GenerateQuestions)
 	api.POST("/session/start", sessionHandler.StartSession)
 	api.POST("/session/answer", sessionHandler.SubmitAnswer)
+	api.POST("/feedback/generate", feedbackHandler.GenerateFeedback)
 
 	return r
 }

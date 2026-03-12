@@ -121,3 +121,28 @@ func (uc *interviewUseCase) SubmitSessionAnswer(userID, sessionID, questionID, a
 
 	return uc.repo.SaveSessionAnswer(userID, sessionID, questionID, answer)
 }
+
+func (uc *interviewUseCase) GenerateFeedback(userID, sessionID, questionID, question, answer string) (*domain.FeedbackRecord, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errors.New("user id is required")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, errors.New("session id is required")
+	}
+	if strings.TrimSpace(questionID) == "" {
+		return nil, errors.New("question id is required")
+	}
+	if strings.TrimSpace(question) == "" {
+		return nil, errors.New("question is required")
+	}
+	if strings.TrimSpace(answer) == "" {
+		return nil, errors.New("answer is required")
+	}
+
+	analysis, err := uc.aiService.AnalyzeAnswer(question, answer)
+	if err != nil {
+		return nil, err
+	}
+
+	return uc.repo.SaveFeedback(userID, sessionID, questionID, question, answer, analysis)
+}

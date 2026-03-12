@@ -6,7 +6,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/interview_app/backend/config"
 	"github.com/interview_app/backend/internal/delivery/http/handler"
 	"github.com/interview_app/backend/internal/delivery/http/middleware"
@@ -16,6 +15,7 @@ import (
 	"github.com/interview_app/backend/internal/repository"
 	"github.com/interview_app/backend/internal/service/ai"
 	"github.com/interview_app/backend/internal/usecase"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
@@ -42,11 +42,12 @@ func main() {
 	resumeHandler := handler.NewResumeHandler(interviewUC)
 	questionHandler := handler.NewQuestionHandler(interviewUC)
 	sessionHandler := handler.NewSessionHandler(interviewUC)
+	feedbackHandler := handler.NewFeedbackHandler(interviewUC)
 	meHandler := handler.NewMeHandler()
 	authMiddleware := middleware.AuthMiddleware(cfg)
 
 	// Setup router
-	r := router.Setup(healthHandler, meHandler, jobHandler, resumeHandler, questionHandler, sessionHandler, authMiddleware)
+	r := router.Setup(healthHandler, meHandler, jobHandler, resumeHandler, questionHandler, sessionHandler, feedbackHandler, authMiddleware)
 
 	addr := fmt.Sprintf(":%s", cfg.ServerPort)
 	log.Printf("Server starting on %s (env: %s)", addr, cfg.Env)

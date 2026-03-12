@@ -18,6 +18,7 @@ type interviewRepository struct {
 	questions  map[string]domain.StoredQuestion
 	sessions   map[string]domain.PracticeSession
 	answers    map[string]domain.SessionAnswer
+	feedbacks  map[string]domain.FeedbackRecord
 }
 
 // NewInterviewRepository creates interview repository with postgres support and in-memory fallback.
@@ -29,6 +30,7 @@ func NewInterviewRepository(pool *pgxpool.Pool) domain.InterviewRepository {
 		questions:  make(map[string]domain.StoredQuestion),
 		sessions:   make(map[string]domain.PracticeSession),
 		answers:    make(map[string]domain.SessionAnswer),
+		feedbacks:  make(map[string]domain.FeedbackRecord),
 	}
 }
 
@@ -286,4 +288,109 @@ func (r *interviewRepository) SaveSessionAnswer(userID, sessionID, questionID, a
 	defer r.mu.Unlock()
 	r.answers[record.ID] = *record
 	return record, nil
+}
+
+func (r *interviewRepository) SaveFeedback(
+	userID, sessionID, questionID, question, answer string,
+	analysis *domain.AnswerAnalysis,
+) (*domain.FeedbackRecord, error) {
+	now := time.Now().UTC()
+	record := &domain.FeedbackRecord{
+		ID:           uuid.NewString(),
+		UserID:       userID,
+		SessionID:    sessionID,
+		QuestionID:   questionID,
+		Question:     question,
+		Answer:       answer,
+		Score:        analysis.Score,
+		Strengths:    append([]string{}, analysis.Strengths...),
+		Weaknesses:   append([]string{}, analysis.Weaknesses...),
+		Improvements: append([]string{}, analysis.Improvements...),
+		STARFeedback: analysis.STARFeedback,
+		CreatedAt:    now,
+	}
+
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := r.pool.Exec(
+			ctx,
+			`INSERT INTO app_feedback
+				(id, user_id, session_id, question_id, question_text, answer_text, score, strengths, weaknesses, improvements, star_feedback, created_at)
+			 VALUES
+				($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			record.ID,
+			record.UserID,
+			record.SessionID,
+			record.QuestionID,
+			record.Question,
+			record.Answer,
+			record.Score,
+			record.Strengths,
+			record.Weaknesses,
+			record.Improvements,
+			record.STARFeedback,
+			record.CreatedAt,
+		)
+		if err == nil {
+			return record, nil
+		}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.feedbacks[record.ID] = *record
+	return record, nil
+}
+
+func (r *interviewRepository) ListFeedbackByUser(userID string) ([]domain.FeedbackRecord, error) {
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		rows, err := r.pool.Query(
+			ctx,
+			`SELECT id, user_id, session_id, question_id, question_text, answer_text, score, strengths, weaknesses, improvements, star_feedback, created_at
+			   FROM app_feedback
+			  WHERE user_id = $1
+			  ORDER BY created_at DESC`,
+			userID,
+		)
+		if err == nil {
+			defer rows.Close()
+			result := make([]domain.FeedbackRecord, 0)
+			for rows.Next() {
+				var item domain.FeedbackRecord
+				if scanErr := rows.Scan(
+					&item.ID,
+					&item.UserID,
+					&item.SessionID,
+					&item.QuestionID,
+					&item.Question,
+					&item.Answer,
+					&item.Score,
+					&item.Strengths,
+					&item.Weaknesses,
+					&item.Improvements,
+					&item.STARFeedback,
+					&item.CreatedAt,
+				); scanErr == nil {
+					result = append(result, item)
+				}
+			}
+			return result, nil
+		}
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]domain.FeedbackRecord, 0)
+	for _, item := range r.feedbacks {
+		if item.UserID == userID {
+			result = append(result, item)
+		}
+	}
+	return result, nil
 }
