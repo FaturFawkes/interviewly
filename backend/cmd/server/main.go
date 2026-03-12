@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/interview_app/backend/config"
 	"github.com/interview_app/backend/internal/delivery/http/handler"
 	"github.com/interview_app/backend/internal/delivery/http/middleware"
@@ -13,13 +14,14 @@ import (
 	"github.com/interview_app/backend/internal/infrastructure/cache"
 	"github.com/interview_app/backend/internal/infrastructure/database"
 	"github.com/interview_app/backend/internal/repository"
+	"github.com/interview_app/backend/internal/service/ai"
 	"github.com/interview_app/backend/internal/usecase"
 )
 
 func main() {
 	// Load configuration
 	cfg := config.Load()
-	postgresCleanup := setupPostgres(cfg)
+	postgresPool, postgresCleanup := setupPostgres(cfg)
 	if postgresCleanup != nil {
 		defer postgresCleanup()
 	}
@@ -33,11 +35,15 @@ func main() {
 	healthRepo := repository.NewHealthRepository()
 	healthUC := usecase.NewHealthUseCase(healthRepo)
 	healthHandler := handler.NewHealthHandler(healthUC)
+	aiService := ai.NewService()
+	interviewRepo := repository.NewInterviewRepository(postgresPool)
+	interviewUC := usecase.NewInterviewUseCase(aiService, interviewRepo)
+	jobHandler := handler.NewJobHandler(interviewUC)
 	meHandler := handler.NewMeHandler()
 	authMiddleware := middleware.AuthMiddleware(cfg)
 
 	// Setup router
-	r := router.Setup(healthHandler, meHandler, authMiddleware)
+	r := router.Setup(healthHandler, meHandler, jobHandler, authMiddleware)
 
 	addr := fmt.Sprintf(":%s", cfg.ServerPort)
 	log.Printf("Server starting on %s (env: %s)", addr, cfg.Env)
@@ -47,19 +53,19 @@ func main() {
 	}
 }
 
-func setupPostgres(cfg *config.Config) func() {
+func setupPostgres(cfg *config.Config) (*pgxpool.Pool, func()) {
 	pool, err := database.NewPostgresPool(cfg)
 	if err != nil {
 		log.Printf("PostgreSQL not initialized: %v", err)
-		return nil
+		return nil, nil
 	}
 	if pool == nil {
 		log.Println("PostgreSQL not initialized: DATABASE_URL is empty")
-		return nil
+		return nil, nil
 	}
 
 	log.Println("database connected")
-	return pool.Close
+	return pool, pool.Close
 }
 
 func setupRedis(cfg *config.Config) func() {

@@ -9,6 +9,7 @@ import (
 func Setup(
 	healthHandler *handler.HealthHandler,
 	meHandler *handler.MeHandler,
+	jobHandler *handler.JobHandler,
 	authMiddleware gin.HandlerFunc,
 ) *gin.Engine {
 	r := gin.Default()
@@ -19,6 +20,7 @@ func Setup(
 	api := r.Group("/api")
 	api.Use(authMiddleware)
 	api.GET("/me", meHandler.GetMe)
+	api.POST("/job/parse", jobHandler.ParseJobDescription)
 
 	return r
 }
