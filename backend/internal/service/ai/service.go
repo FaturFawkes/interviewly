@@ -64,12 +64,79 @@ func (s *Service) GenerateQuestions(resumeText, jobDescription string) ([]domain
 }
 
 func (s *Service) AnalyzeAnswer(question, answer string) (*domain.AnswerAnalysis, error) {
+	normalizedAnswer := strings.TrimSpace(answer)
+	wordCount := len(strings.Fields(normalizedAnswer))
+
+	score := 45
+	strengths := make([]string, 0)
+	weaknesses := make([]string, 0)
+	improvements := make([]string, 0)
+
+	if wordCount >= 40 {
+		score += 20
+		strengths = append(strengths, "sufficient detail")
+	} else {
+		weaknesses = append(weaknesses, "answer is too brief")
+		improvements = append(improvements, "add more context and concrete details")
+	}
+
+	if containsAny(normalizedAnswer, []string{"I ", "i "}) {
+		score += 10
+		strengths = append(strengths, "clear ownership of actions")
+	} else {
+		weaknesses = append(weaknesses, "ownership is unclear")
+		improvements = append(improvements, "describe your specific actions")
+	}
+
+	if containsAny(strings.ToLower(normalizedAnswer), []string{"result", "impact", "%", "improved", "reduced", "increased"}) {
+		score += 15
+		strengths = append(strengths, "mentions outcome or impact")
+	} else {
+		weaknesses = append(weaknesses, "missing measurable outcomes")
+		improvements = append(improvements, "include measurable results when possible")
+	}
+
+	questionTokens := topKeywords(tokenize(strings.ToLower(question)), 5)
+	answerTokens := tokenize(strings.ToLower(normalizedAnswer))
+	matchCount := 0
+	for _, token := range questionTokens {
+		if containsAny(strings.Join(answerTokens, " "), []string{token}) {
+			matchCount++
+		}
+	}
+	if matchCount >= 2 {
+		score += 10
+		strengths = append(strengths, "answer is relevant to the question")
+	} else {
+		weaknesses = append(weaknesses, "answer drifts from the main question")
+		improvements = append(improvements, "focus directly on the asked topic")
+	}
+
+	if score > 100 {
+		score = 100
+	}
+	if score < 0 {
+		score = 0
+	}
+
+	if len(strengths) == 0 {
+		strengths = append(strengths, "response provided")
+	}
+	if len(weaknesses) == 0 {
+		weaknesses = append(weaknesses, "minor clarity improvements possible")
+	}
+	if len(improvements) == 0 {
+		improvements = append(improvements, "add clearer structure and concise takeaway")
+	}
+
+	starFeedback := "Use STAR framing: Situation and Task in 1-2 sentences, then specific Actions you took, and end with measurable Result."
+
 	return &domain.AnswerAnalysis{
-		Score:        70,
-		Strengths:    []string{"clear communication"},
-		Weaknesses:   []string{"could add more detail"},
-		Improvements: []string{"include measurable impact"},
-		STARFeedback: "Structure your answer with Situation, Task, Action, and Result.",
+		Score:        score,
+		Strengths:    strengths,
+		Weaknesses:   weaknesses,
+		Improvements: improvements,
+		STARFeedback: starFeedback,
 	}, nil
 }
 
@@ -210,4 +277,13 @@ func pickOrDefault(values []string, idx int, fallback string) string {
 		return values[idx]
 	}
 	return fallback
+}
+
+func containsAny(input string, candidates []string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(input, candidate) {
+			return true
+		}
+	}
+	return false
 }
