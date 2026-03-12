@@ -80,3 +80,27 @@ func (uc *interviewUseCase) GenerateQuestions(userID, resumeText, jobDescription
 
 	return uc.repo.SaveGeneratedQuestions(userID, resume.ID, parsedJob.ID, generated)
 }
+
+func (uc *interviewUseCase) CreatePracticeSession(userID, resumeID, jobParseID string, questionIDs []string) (*domain.PracticeSession, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errors.New("user id is required")
+	}
+	if strings.TrimSpace(resumeID) == "" {
+		return nil, errors.New("resume id is required")
+	}
+	if strings.TrimSpace(jobParseID) == "" {
+		return nil, errors.New("job parse id is required")
+	}
+	if len(questionIDs) == 0 {
+		return nil, errors.New("question ids are required")
+	}
+
+	return uc.repo.CreatePracticeSession(userID, resumeID, jobParseID, questionIDs)
+}
+
+func (uc *interviewUseCase) ListPracticeSessions(userID string) ([]domain.PracticeSession, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errors.New("user id is required")
+	}
+	return uc.repo.ListPracticeSessions(userID)
+}
