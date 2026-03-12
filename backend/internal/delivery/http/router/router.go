@@ -14,6 +14,7 @@ func Setup(
 	questionHandler *handler.QuestionHandler,
 	sessionHandler *handler.SessionHandler,
 	feedbackHandler *handler.FeedbackHandler,
+	progressHandler *handler.ProgressHandler,
 	authMiddleware gin.HandlerFunc,
 ) *gin.Engine {
 	r := gin.Default()
@@ -31,6 +32,7 @@ func Setup(
 	api.POST("/session/answer", sessionHandler.SubmitAnswer)
 	api.GET("/session/history", sessionHandler.GetSessionHistory)
 	api.POST("/feedback/generate", feedbackHandler.GenerateFeedback)
+	api.GET("/progress", progressHandler.GetProgress)
 
 	return r
 }
