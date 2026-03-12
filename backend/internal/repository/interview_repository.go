@@ -15,6 +15,7 @@ type interviewRepository struct {
 	mu         sync.RWMutex
 	parsedJobs map[string]*domain.ParsedJobDescription
 	resumes    map[string]*domain.ResumeRecord
+	questions  map[string]domain.StoredQuestion
 }
 
 // NewInterviewRepository creates interview repository with postgres support and in-memory fallback.
@@ -23,6 +24,7 @@ func NewInterviewRepository(pool *pgxpool.Pool) domain.InterviewRepository {
 		pool:       pool,
 		parsedJobs: make(map[string]*domain.ParsedJobDescription),
 		resumes:    make(map[string]*domain.ResumeRecord),
+		questions:  make(map[string]domain.StoredQuestion),
 	}
 }
 
@@ -99,4 +101,53 @@ func (r *interviewRepository) SaveResume(userID, content string) (*domain.Resume
 	defer r.mu.Unlock()
 	r.resumes[resume.ID] = resume
 	return resume, nil
+}
+
+func (r *interviewRepository) SaveGeneratedQuestions(userID, resumeID, jobParseID string, questions []domain.GeneratedQuestion) ([]domain.StoredQuestion, error) {
+	now := time.Now().UTC()
+	stored := make([]domain.StoredQuestion, 0, len(questions))
+
+	for _, item := range questions {
+		record := domain.StoredQuestion{
+			ID:         uuid.NewString(),
+			UserID:     userID,
+			ResumeID:   resumeID,
+			JobParseID: jobParseID,
+			Type:       item.Type,
+			Question:   item.Question,
+			CreatedAt:  now,
+		}
+
+		if r.pool != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, err := r.pool.Exec(
+				ctx,
+				`INSERT INTO app_questions
+					(id, user_id, resume_id, job_parse_id, question_type, question_text, created_at)
+				 VALUES
+					($1, $2, $3, $4, $5, $6, $7)`,
+				record.ID,
+				record.UserID,
+				record.ResumeID,
+				record.JobParseID,
+				record.Type,
+				record.Question,
+				record.CreatedAt,
+			)
+			cancel()
+			if err != nil {
+				r.mu.Lock()
+				r.questions[record.ID] = record
+				r.mu.Unlock()
+			}
+		} else {
+			r.mu.Lock()
+			r.questions[record.ID] = record
+			r.mu.Unlock()
+		}
+
+		stored = append(stored, record)
+	}
+
+	return stored, nil
 }

@@ -11,6 +11,7 @@ func Setup(
 	meHandler *handler.MeHandler,
 	jobHandler *handler.JobHandler,
 	resumeHandler *handler.ResumeHandler,
+	questionHandler *handler.QuestionHandler,
 	authMiddleware gin.HandlerFunc,
 ) *gin.Engine {
 	r := gin.Default()
@@ -23,6 +24,7 @@ func Setup(
 	api.GET("/me", meHandler.GetMe)
 	api.POST("/job/parse", jobHandler.ParseJobDescription)
 	api.POST("/resume", resumeHandler.SaveResume)
+	api.POST("/questions/generate", questionHandler.GenerateQuestions)
 
 	return r
 }

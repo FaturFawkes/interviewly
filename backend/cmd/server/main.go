@@ -40,11 +40,12 @@ func main() {
 	interviewUC := usecase.NewInterviewUseCase(aiService, interviewRepo)
 	jobHandler := handler.NewJobHandler(interviewUC)
 	resumeHandler := handler.NewResumeHandler(interviewUC)
+	questionHandler := handler.NewQuestionHandler(interviewUC)
 	meHandler := handler.NewMeHandler()
 	authMiddleware := middleware.AuthMiddleware(cfg)
 
 	// Setup router
-	r := router.Setup(healthHandler, meHandler, jobHandler, resumeHandler, authMiddleware)
+	r := router.Setup(healthHandler, meHandler, jobHandler, resumeHandler, questionHandler, authMiddleware)
 
 	addr := fmt.Sprintf(":%s", cfg.ServerPort)
 	log.Printf("Server starting on %s (env: %s)", addr, cfg.Env)
