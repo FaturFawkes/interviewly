@@ -29,6 +29,7 @@ func Setup(
 	api.POST("/questions/generate", questionHandler.GenerateQuestions)
 	api.POST("/session/start", sessionHandler.StartSession)
 	api.POST("/session/answer", sessionHandler.SubmitAnswer)
+	api.GET("/session/history", sessionHandler.GetSessionHistory)
 	api.POST("/feedback/generate", feedbackHandler.GenerateFeedback)
 
 	return r

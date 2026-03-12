@@ -86,3 +86,26 @@ func (h *SessionHandler) SubmitAnswer(c *gin.Context) {
 
 	c.JSON(http.StatusOK, result)
 }
+
+// GetSessionHistory handles GET /api/session/history.
+func (h *SessionHandler) GetSessionHistory(c *gin.Context) {
+	userIDValue, exists := c.Get(middleware.UserIDContextKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	userID, ok := userIDValue.(string)
+	if !ok || userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user context"})
+		return
+	}
+
+	sessions, err := h.interviewUC.ListPracticeSessions(userID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"sessions": sessions})
+}
