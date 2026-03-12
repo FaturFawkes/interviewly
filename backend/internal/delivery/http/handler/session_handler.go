@@ -14,6 +14,12 @@ type startSessionRequest struct {
 	QuestionIDs []string `json:"question_ids" binding:"required"`
 }
 
+type submitAnswerRequest struct {
+	SessionID  string `json:"session_id" binding:"required"`
+	QuestionID string `json:"question_id" binding:"required"`
+	Answer     string `json:"answer" binding:"required"`
+}
+
 // SessionHandler handles interview session APIs.
 type SessionHandler struct {
 	interviewUC domain.InterviewUseCase
@@ -50,4 +56,33 @@ func (h *SessionHandler) StartSession(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, session)
+}
+
+// SubmitAnswer handles POST /api/session/answer.
+func (h *SessionHandler) SubmitAnswer(c *gin.Context) {
+	var req submitAnswerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userIDValue, exists := c.Get(middleware.UserIDContextKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	userID, ok := userIDValue.(string)
+	if !ok || userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user context"})
+		return
+	}
+
+	result, err := h.interviewUC.SubmitSessionAnswer(userID, req.SessionID, req.QuestionID, req.Answer)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
 }

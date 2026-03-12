@@ -49,6 +49,16 @@ type PracticeSession struct {
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
+// SessionAnswer represents one submitted answer in an interview session.
+type SessionAnswer struct {
+	ID         string    `json:"id"`
+	SessionID  string    `json:"session_id"`
+	QuestionID string    `json:"question_id"`
+	UserID     string    `json:"user_id"`
+	Answer     string    `json:"answer"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 // InterviewRepository defines data persistence required by interview workflows.
 type InterviewRepository interface {
 	SaveParsedJob(userID, rawDescription string, insights *JobInsights) (*ParsedJobDescription, error)
@@ -56,6 +66,7 @@ type InterviewRepository interface {
 	SaveGeneratedQuestions(userID, resumeID, jobParseID string, questions []GeneratedQuestion) ([]StoredQuestion, error)
 	CreatePracticeSession(userID, resumeID, jobParseID string, questionIDs []string) (*PracticeSession, error)
 	ListPracticeSessions(userID string) ([]PracticeSession, error)
+	SaveSessionAnswer(userID, sessionID, questionID, answer string) (*SessionAnswer, error)
 }
 
 // InterviewUseCase defines interview workflows.
@@ -65,4 +76,5 @@ type InterviewUseCase interface {
 	GenerateQuestions(userID, resumeText, jobDescription string) ([]StoredQuestion, error)
 	CreatePracticeSession(userID, resumeID, jobParseID string, questionIDs []string) (*PracticeSession, error)
 	ListPracticeSessions(userID string) ([]PracticeSession, error)
+	SubmitSessionAnswer(userID, sessionID, questionID, answer string) (*SessionAnswer, error)
 }

@@ -17,6 +17,7 @@ type interviewRepository struct {
 	resumes    map[string]*domain.ResumeRecord
 	questions  map[string]domain.StoredQuestion
 	sessions   map[string]domain.PracticeSession
+	answers    map[string]domain.SessionAnswer
 }
 
 // NewInterviewRepository creates interview repository with postgres support and in-memory fallback.
@@ -27,6 +28,7 @@ func NewInterviewRepository(pool *pgxpool.Pool) domain.InterviewRepository {
 		resumes:    make(map[string]*domain.ResumeRecord),
 		questions:  make(map[string]domain.StoredQuestion),
 		sessions:   make(map[string]domain.PracticeSession),
+		answers:    make(map[string]domain.SessionAnswer),
 	}
 }
 
@@ -245,4 +247,43 @@ func (r *interviewRepository) ListPracticeSessions(userID string) ([]domain.Prac
 	}
 
 	return result, nil
+}
+
+func (r *interviewRepository) SaveSessionAnswer(userID, sessionID, questionID, answer string) (*domain.SessionAnswer, error) {
+	now := time.Now().UTC()
+	record := &domain.SessionAnswer{
+		ID:         uuid.NewString(),
+		SessionID:  sessionID,
+		QuestionID: questionID,
+		UserID:     userID,
+		Answer:     answer,
+		CreatedAt:  now,
+	}
+
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := r.pool.Exec(
+			ctx,
+			`INSERT INTO app_session_answers
+				(id, session_id, question_id, user_id, answer_text, created_at)
+			 VALUES
+				($1, $2, $3, $4, $5, $6)`,
+			record.ID,
+			record.SessionID,
+			record.QuestionID,
+			record.UserID,
+			record.Answer,
+			record.CreatedAt,
+		)
+		if err == nil {
+			return record, nil
+		}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.answers[record.ID] = *record
+	return record, nil
 }

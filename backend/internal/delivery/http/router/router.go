@@ -27,6 +27,7 @@ func Setup(
 	api.POST("/resume", resumeHandler.SaveResume)
 	api.POST("/questions/generate", questionHandler.GenerateQuestions)
 	api.POST("/session/start", sessionHandler.StartSession)
+	api.POST("/session/answer", sessionHandler.SubmitAnswer)
 
 	return r
 }

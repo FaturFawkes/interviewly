@@ -104,3 +104,20 @@ func (uc *interviewUseCase) ListPracticeSessions(userID string) ([]domain.Practi
 	}
 	return uc.repo.ListPracticeSessions(userID)
 }
+
+func (uc *interviewUseCase) SubmitSessionAnswer(userID, sessionID, questionID, answer string) (*domain.SessionAnswer, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errors.New("user id is required")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, errors.New("session id is required")
+	}
+	if strings.TrimSpace(questionID) == "" {
+		return nil, errors.New("question id is required")
+	}
+	if strings.TrimSpace(answer) == "" {
+		return nil, errors.New("answer is required")
+	}
+
+	return uc.repo.SaveSessionAnswer(userID, sessionID, questionID, answer)
+}
