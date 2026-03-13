@@ -16,6 +16,17 @@ This backend can be deployed to Fly.io (recommended) or Railway using Docker.
 - `JWT_SECRET`
 - `JWT_ISSUER`
 
+## Run database migrations
+
+```bash
+migrate -path migrations -database "$DATABASE_URL" up
+```
+
+Notes:
+
+- Migration `000009_enforce_interview_reference_integrity` cleans orphan rows in `app_session_answers` and `app_feedback` before adding foreign key constraints.
+- This ensures invalid `session_id` / `question_id` references are rejected at database level.
+
 ## Build and run locally with Docker
 
 ```bash
@@ -37,3 +48,11 @@ fly deploy
 - Set root directory to `backend`.
 - Railway detects `Dockerfile` automatically.
 - Configure environment variables from the list above.
+
+## Regression test
+
+Run backend API regression test before deploy:
+
+```bash
+make test-e2e
+```
