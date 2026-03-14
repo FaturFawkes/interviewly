@@ -9,7 +9,7 @@ import (
 )
 
 type generateQuestionsRequest struct {
-	ResumeText     string `json:"resume_text" binding:"required"`
+	ResumeText     string `json:"resume_text"`
 	JobDescription string `json:"job_description" binding:"required"`
 }
 

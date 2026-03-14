@@ -39,3 +39,26 @@ func (h *ProgressHandler) GetProgress(c *gin.Context) {
 
 	c.JSON(http.StatusOK, progress)
 }
+
+// GetAnalyticsOverview handles GET /api/analytics/overview.
+func (h *ProgressHandler) GetAnalyticsOverview(c *gin.Context) {
+	userIDValue, exists := c.Get(middleware.UserIDContextKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	userID, ok := userIDValue.(string)
+	if !ok || userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user context"})
+		return
+	}
+
+	overview, err := h.interviewUC.GetAnalyticsOverview(userID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, overview)
+}

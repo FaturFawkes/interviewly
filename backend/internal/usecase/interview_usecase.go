@@ -4,7 +4,9 @@ import (
 	"errors"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/interview_app/backend/internal/domain"
 )
@@ -53,16 +55,26 @@ func (uc *interviewUseCase) GenerateQuestions(userID, resumeText, jobDescription
 	if strings.TrimSpace(userID) == "" {
 		return nil, errors.New("user id is required")
 	}
-	if strings.TrimSpace(resumeText) == "" {
-		return nil, errors.New("resume text is required")
-	}
 	if strings.TrimSpace(jobDescription) == "" {
 		return nil, errors.New("job description is required")
 	}
 
-	resume, err := uc.repo.SaveResume(userID, resumeText)
-	if err != nil {
-		return nil, err
+	var resume *domain.ResumeRecord
+	var err error
+	if strings.TrimSpace(resumeText) == "" {
+		resume, err = uc.repo.GetLatestResume(userID)
+		if err != nil {
+			return nil, err
+		}
+		if resume == nil || strings.TrimSpace(resume.Content) == "" {
+			return nil, errors.New("resume not found, please upload and analyze your cv first")
+		}
+		resumeText = resume.Content
+	} else {
+		resume, err = uc.repo.SaveResume(userID, resumeText)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	insights, err := uc.aiService.ParseJobDescription(jobDescription)
@@ -83,7 +95,7 @@ func (uc *interviewUseCase) GenerateQuestions(userID, resumeText, jobDescription
 	return uc.repo.SaveGeneratedQuestions(userID, resume.ID, parsedJob.ID, generated)
 }
 
-func (uc *interviewUseCase) CreatePracticeSession(userID, resumeID, jobParseID string, questionIDs []string) (*domain.PracticeSession, error) {
+func (uc *interviewUseCase) CreatePracticeSession(userID, resumeID, jobParseID string, questionIDs []string, metadata domain.SessionMetadata) (*domain.PracticeSession, error) {
 	if strings.TrimSpace(userID) == "" {
 		return nil, errors.New("user id is required")
 	}
@@ -97,7 +109,18 @@ func (uc *interviewUseCase) CreatePracticeSession(userID, resumeID, jobParseID s
 		return nil, errors.New("question ids are required")
 	}
 
-	return uc.repo.CreatePracticeSession(userID, resumeID, jobParseID, questionIDs)
+	mode := strings.TrimSpace(strings.ToLower(metadata.InterviewMode))
+	if mode == "" {
+		mode = "text"
+	}
+	if mode != "text" && mode != "voice" {
+		return nil, errors.New("interview mode must be text or voice")
+	}
+	metadata.InterviewMode = mode
+	metadata.TargetRole = strings.TrimSpace(metadata.TargetRole)
+	metadata.TargetCompany = strings.TrimSpace(metadata.TargetCompany)
+
+	return uc.repo.CreatePracticeSession(userID, resumeID, jobParseID, questionIDs, metadata)
 }
 
 func (uc *interviewUseCase) ListPracticeSessions(userID string) ([]domain.PracticeSession, error) {
@@ -105,6 +128,26 @@ func (uc *interviewUseCase) ListPracticeSessions(userID string) ([]domain.Practi
 		return nil, errors.New("user id is required")
 	}
 	return uc.repo.ListPracticeSessions(userID)
+}
+
+func (uc *interviewUseCase) CompletePracticeSession(userID, sessionID string) (*domain.PracticeSession, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errors.New("user id is required")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, errors.New("session id is required")
+	}
+
+	session, err := uc.repo.CompletePracticeSession(userID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, aggregateErr := uc.AggregateProgress(userID); aggregateErr != nil {
+		return nil, aggregateErr
+	}
+
+	return session, nil
 }
 
 func (uc *interviewUseCase) SubmitSessionAnswer(userID, sessionID, questionID, answer string) (*domain.SessionAnswer, error) {
@@ -202,6 +245,125 @@ func (uc *interviewUseCase) GetProgress(userID string) (*domain.ProgressMetrics,
 		return nil, errors.New("user id is required")
 	}
 	return uc.repo.GetProgressMetrics(userID)
+}
+
+func (uc *interviewUseCase) GetAnalyticsOverview(userID string) (*domain.AnalyticsOverview, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errors.New("user id is required")
+	}
+
+	progress, err := uc.AggregateProgress(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	sessions, err := uc.repo.ListPracticeSessions(userID)
+	if err != nil {
+		return nil, err
+	}
+	completedSessions := filterCompletedSessions(sessions)
+
+	readiness := int(math.Min(100, math.Round(progress.AverageScore*0.78+float64(progress.SessionsCompleted)*2.4)))
+	practiceHours := math.Round((float64(progress.SessionsCompleted)*18.0/60.0)*10) / 10
+
+	history := make([]domain.AnalyticsPoint, 0)
+	for index, session := range completedSessions {
+		if index >= 8 {
+			break
+		}
+		history = append(history, domain.AnalyticsPoint{
+			Label: "S" + strconv.Itoa(index+1),
+			Score: session.Score,
+		})
+	}
+
+	avgScoreTrend := 0
+	if len(completedSessions) >= 2 {
+		latest := completedSessions[0].Score
+		oldest := completedSessions[len(completedSessions)-1].Score
+		avgScoreTrend = latest - oldest
+	}
+
+	recommendations := make([]string, 0)
+	if len(progress.WeakAreas) > 0 {
+		for _, weak := range progress.WeakAreas {
+			recommendations = append(recommendations, "Practice one STAR answer focused on "+strings.ToLower(weak)+".")
+		}
+	} else {
+		recommendations = append(recommendations, "No personalized recommendations yet. Complete a practice session first.")
+	}
+
+	streak := computePracticeStreakDays(completedSessions)
+
+	recentSessions := completedSessions
+	if len(recentSessions) > 5 {
+		recentSessions = recentSessions[:5]
+	}
+
+	return &domain.AnalyticsOverview{
+		InterviewReadiness: readiness,
+		AverageScore:       progress.AverageScore,
+		AvgScoreTrend:      avgScoreTrend,
+		TotalSessions:      progress.SessionsCompleted,
+		PracticeHours:      practiceHours,
+		PracticeStreakDays: streak,
+		WeakAreas:          append([]string{}, progress.WeakAreas...),
+		Recommendations:    recommendations,
+		RecentSessions:     append([]domain.PracticeSession{}, recentSessions...),
+		ScoreHistory:       history,
+	}, nil
+}
+
+func filterCompletedSessions(sessions []domain.PracticeSession) []domain.PracticeSession {
+	filtered := make([]domain.PracticeSession, 0, len(sessions))
+	for _, session := range sessions {
+		if session.Status == domain.SessionStatusCompleted {
+			filtered = append(filtered, session)
+		}
+	}
+	return filtered
+}
+
+func computePracticeStreakDays(sessions []domain.PracticeSession) int {
+	if len(sessions) == 0 {
+		return 0
+	}
+
+	seen := make(map[string]struct{})
+	days := make([]time.Time, 0)
+	for _, session := range sessions {
+		timestamp := session.CreatedAt
+		if session.CompletedAt != nil {
+			timestamp = *session.CompletedAt
+		}
+		day := time.Date(timestamp.Year(), timestamp.Month(), timestamp.Day(), 0, 0, 0, 0, time.UTC)
+		key := day.Format("2006-01-02")
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		days = append(days, day)
+	}
+
+	if len(days) == 0 {
+		return 0
+	}
+
+	sort.Slice(days, func(i, j int) bool {
+		return days[i].After(days[j])
+	})
+
+	streak := 1
+	for i := 1; i < len(days); i++ {
+		diff := days[i-1].Sub(days[i]).Hours() / 24
+		if diff == 1 {
+			streak++
+			continue
+		}
+		break
+	}
+
+	return streak
 }
 
 func topWeakAreas(freq map[string]int, limit int) []string {

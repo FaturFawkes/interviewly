@@ -19,6 +19,22 @@ type Config struct {
 	RedisDB                       int
 	JWTSecret                     string
 	JWTIssuer                     string
+	SMTPHost                      string
+	SMTPPort                      int
+	SMTPUsername                  string
+	SMTPPassword                  string
+	SMTPFromEmail                 string
+	SMTPFromName                  string
+	OTPExpiryMinutes              int
+	AIProvider                    string
+	AIModel                       string
+	AIAPIBaseURL                  string
+	AIAPIKey                      string
+	VoiceProvider                 string
+	ElevenLabsAPIKey              string
+	ElevenLabsVoiceID             string
+	ElevenLabsTTSModel            string
+	ElevenLabsSTTModel            string
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -35,6 +51,22 @@ func Load() *Config {
 		RedisDB:                       getEnvInt("REDIS_DB", 0),
 		JWTSecret:                     getEnv("JWT_SECRET", ""),
 		JWTIssuer:                     getEnv("JWT_ISSUER", ""),
+		SMTPHost:                      getEnv("SMTP_HOST", ""),
+		SMTPPort:                      getEnvInt("SMTP_PORT", 587),
+		SMTPUsername:                  getEnv("SMTP_USERNAME", ""),
+		SMTPPassword:                  getEnv("SMTP_PASSWORD", ""),
+		SMTPFromEmail:                 getEnv("SMTP_FROM_EMAIL", "no-reply@interviewly.local"),
+		SMTPFromName:                  getEnv("SMTP_FROM_NAME", "Interviewly"),
+		OTPExpiryMinutes:              getEnvInt("OTP_EXPIRY_MINUTES", 10),
+		AIProvider:                    strings.ToLower(getEnv("AI_PROVIDER", "openai")),
+		AIModel:                       getEnv("AI_MODEL", "gpt-4o-mini"),
+		AIAPIBaseURL:                  getEnv("AI_API_BASE_URL", "https://api.openai.com/v1"),
+		AIAPIKey:                      getEnv("AI_API_KEY", ""),
+		VoiceProvider:                 strings.ToLower(getEnv("VOICE_PROVIDER", "elevenlabs")),
+		ElevenLabsAPIKey:              getEnv("ELEVENLABS_API_KEY", ""),
+		ElevenLabsVoiceID:             getEnv("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL"),
+		ElevenLabsTTSModel:            getEnv("ELEVENLABS_TTS_MODEL", "eleven_multilingual_v2"),
+		ElevenLabsSTTModel:            getEnv("ELEVENLABS_STT_MODEL", "scribe_v1"),
 	}
 }
 

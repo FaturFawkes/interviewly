@@ -14,6 +14,8 @@ import (
 	"github.com/interview_app/backend/internal/infrastructure/database"
 	"github.com/interview_app/backend/internal/repository"
 	"github.com/interview_app/backend/internal/service/ai"
+	"github.com/interview_app/backend/internal/service/notification"
+	"github.com/interview_app/backend/internal/service/voice"
 	"github.com/interview_app/backend/internal/usecase"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -35,20 +37,26 @@ func main() {
 	healthRepo := repository.NewHealthRepository()
 	healthUC := usecase.NewHealthUseCase(healthRepo)
 	healthHandler := handler.NewHealthHandler(healthUC)
-	aiService := ai.NewService()
+	aiService := ai.NewService(cfg)
 	interviewRepo := repository.NewInterviewRepository(postgresPool)
 	interviewUC := usecase.NewInterviewUseCase(aiService, interviewRepo)
 	jobHandler := handler.NewJobHandler(interviewUC)
 	resumeHandler := handler.NewResumeHandler(interviewUC)
 	questionHandler := handler.NewQuestionHandler(interviewUC)
+	voiceService := voice.NewService(cfg)
+	voiceHandler := handler.NewVoiceHandler(voiceService)
 	sessionHandler := handler.NewSessionHandler(interviewUC)
 	feedbackHandler := handler.NewFeedbackHandler(interviewUC)
 	progressHandler := handler.NewProgressHandler(interviewUC)
 	meHandler := handler.NewMeHandler()
+	authRepo := repository.NewAuthRepository(postgresPool)
+	otpSender := notification.NewRegistrationOTPSender(cfg)
+	authUC := usecase.NewAuthUseCase(authRepo, otpSender, cfg.JWTSecret, cfg.JWTIssuer, 24*time.Hour, time.Duration(cfg.OTPExpiryMinutes)*time.Minute)
+	authHandler := handler.NewAuthHandler(authUC)
 	authMiddleware := middleware.AuthMiddleware(cfg)
 
 	// Setup router
-	r := router.Setup(healthHandler, meHandler, jobHandler, resumeHandler, questionHandler, sessionHandler, feedbackHandler, progressHandler, authMiddleware)
+	r := router.Setup(healthHandler, authHandler, meHandler, jobHandler, resumeHandler, questionHandler, voiceHandler, sessionHandler, feedbackHandler, progressHandler, authMiddleware)
 
 	addr := fmt.Sprintf(":%s", cfg.ServerPort)
 	log.Printf("Server starting on %s (env: %s)", addr, cfg.Env)
