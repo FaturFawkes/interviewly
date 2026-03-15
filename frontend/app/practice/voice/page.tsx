@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowRight, Mic, Phone } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "@/components/layout/AppShell";
@@ -35,6 +35,57 @@ export default function VoicePracticePage() {
 	} = useInterviewFlow({ storageKey: "interview-flow-voice" });
 	const isLastQuestion = currentIndex >= questions.length - 1;
 	const interviewLanguageLabel = session?.interview_language === "id" ? "Bahasa Indonesia" : "English";
+
+	useEffect(() => {
+		let cancelled = false;
+
+		if (typeof window === "undefined") {
+			return;
+		}
+
+		const pendingSetupRaw = window.sessionStorage.getItem("pending-practice-voice-setup");
+		if (!pendingSetupRaw) {
+			return;
+		}
+
+		window.sessionStorage.removeItem("pending-practice-voice-setup");
+
+		try {
+			const pendingSetup = JSON.parse(pendingSetupRaw) as {
+				jobDescription?: string;
+				interviewLanguage?: "id" | "en";
+				interviewDifficulty?: "easy" | "medium" | "hard";
+				targetRole?: string;
+				targetCompany?: string;
+			};
+			const pendingJobDescription = pendingSetup.jobDescription?.trim();
+
+			if (!pendingJobDescription) {
+				return;
+			}
+
+			void (async () => {
+				const initialized = await initializeInterview({
+					jobDescription: pendingJobDescription,
+					interviewMode: "voice",
+					interviewLanguage: pendingSetup.interviewLanguage,
+					interviewDifficulty: pendingSetup.interviewDifficulty,
+					targetRole: pendingSetup.targetRole,
+					targetCompany: pendingSetup.targetCompany,
+				});
+
+				if (!cancelled && initialized) {
+					router.replace("/practice/voice/call");
+				}
+			})();
+		} catch {
+			return;
+		}
+
+		return () => {
+			cancelled = true;
+		};
+	}, [initializeInterview, router]);
 
 	function openCallScreen() {
 		router.push("/practice/voice/call");
@@ -189,6 +240,7 @@ function SetupForm({
 		jobDescription: string;
 		interviewMode: "text" | "voice";
 		interviewLanguage: "id" | "en";
+		interviewDifficulty?: "easy" | "medium" | "hard";
 		targetRole: string;
 		targetCompany: string;
 	}) => Promise<boolean>;

@@ -32,7 +32,7 @@ export default function PracticePage() {
 		completeSession,
 		goToNextQuestion,
 		sessionCompleted,
-	} = useInterviewFlow();
+	} = useInterviewFlow({ hydrateOnLoad: false });
 
 	const isLastQuestion = currentIndex >= questions.length - 1;
 	const interviewLanguageLabel = session?.interview_language === "id" ? "Bahasa Indonesia" : "English";
@@ -46,20 +46,15 @@ export default function PracticePage() {
 		targetRole: string;
 		targetCompany: string;
 	}): Promise<boolean> {
-		const initialized = await initializeInterview(payload);
-		if (!initialized || payload.interviewMode !== "voice") {
-			return initialized;
-		}
-
-		if (typeof window !== "undefined") {
-			const textFlowState = window.sessionStorage.getItem("interview-flow");
-			if (textFlowState) {
-				window.sessionStorage.setItem("interview-flow-voice", textFlowState);
+		if (payload.interviewMode === "voice") {
+			if (typeof window !== "undefined") {
+				window.sessionStorage.setItem("pending-practice-voice-setup", JSON.stringify(payload));
 			}
+			router.push("/practice/voice");
+			return true;
 		}
 
-		router.push("/practice/voice");
-		return true;
+		return initializeInterview(payload);
 	}
 
 	return (
@@ -202,7 +197,7 @@ function SetupForm({
 	const [jobDescription, setJobDescription] = useState("");
 	const [targetRole, setTargetRole] = useState("");
 	const [targetCompany, setTargetCompany] = useState("");
-	const [interviewMode, setInterviewMode] = useState<"text" | "voice">("text");
+	const [interviewMode, setInterviewMode] = useState<"text" | "voice" | null>(null);
 	const [interviewLanguage, setInterviewLanguage] = useState<"id" | "en">("id");
 	const [interviewDifficulty, setInterviewDifficulty] = useState<"easy" | "medium" | "hard">("medium");
 
@@ -264,7 +259,11 @@ function SetupForm({
 				</div>
 			</div>
 			<Button
-				onClick={() =>
+				onClick={() => {
+					if (!interviewMode) {
+						return;
+					}
+
 					void onStart({
 						jobDescription,
 						interviewMode,
@@ -272,9 +271,9 @@ function SetupForm({
 						interviewDifficulty,
 						targetRole,
 						targetCompany,
-					})
-				}
-				disabled={loading || !jobDescription.trim()}
+					});
+				}}
+				disabled={loading || !jobDescription.trim() || !interviewMode}
 			>
 				{loading ? "Preparing interview..." : "Start AI interview"}
 				{!loading && <ArrowRight className="ml-2 h-4 w-4" />}

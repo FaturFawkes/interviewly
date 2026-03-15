@@ -1,14 +1,12 @@
 "use client";
 
 import { Conversation, type Mode, type Status } from "@elevenlabs/client";
-import { ArrowLeft, CheckCircle, Mic, MicOff, PhoneOff, Send, SkipForward, Sparkles, Volume2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, PhoneOff, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/Button";
-import { TextArea } from "@/components/ui/Input";
 import { useInterviewFlow } from "@/hooks/useInterviewFlow";
-import { getAuthToken } from "@/lib/auth/token-provider";
 import { api } from "@/lib/api/endpoints";
 import { cn } from "@/lib/utils";
 
@@ -27,29 +25,16 @@ export default function VoiceCallPage() {
     questions,
     currentQuestion,
     currentIndex,
-    answer,
-    setAnswer,
     feedback,
-    loading,
     error,
     timerSeconds,
-    submitCurrentAnswer,
     submitAnswerText,
     completeSession,
     goToNextQuestion,
     sessionCompleted,
   } = useInterviewFlow({ storageKey: "interview-flow-voice" });
 
-  const isLastQuestion = currentIndex >= questions.length - 1;
   const interviewLanguageLabel = session?.interview_language === "id" ? "Bahasa Indonesia" : "English";
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api-proxy";
-
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const voiceChunksRef = useRef<BlobPart[]>([]);
-  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
-  const audioUrlRef = useRef<string | null>(null);
-  const lastSpokenQuestionRef = useRef<string>("");
   const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
   const conversationRef = useRef<Conversation | null>(null);
   const announcedQuestionIDRef = useRef<string>("");
@@ -61,8 +46,6 @@ export default function VoiceCallPage() {
   const sessionCompletedRef = useRef(sessionCompleted);
 
   const [isCallActive, setIsCallActive] = useState(true);
-  const [isListening, setIsListening] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [voiceInfo, setVoiceInfo] = useState<string | null>("Connecting to AI interviewer...");
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>("initializing");
@@ -70,14 +53,6 @@ export default function VoiceCallPage() {
   const [agentMode, setAgentMode] = useState<Mode>("listening");
   const [conversationID, setConversationID] = useState<string | null>(null);
   const [transcriptItems, setTranscriptItems] = useState<TranscriptItem[]>([]);
-
-  const recordingSupported = useMemo(() => {
-    if (typeof window === "undefined") {
-      return false;
-    }
-
-    return Boolean(window.MediaRecorder && navigator.mediaDevices?.getUserMedia);
-  }, []);
 
   useEffect(() => {
     currentIndexRef.current = currentIndex;
@@ -105,26 +80,6 @@ export default function VoiceCallPage() {
     });
   }, []);
 
-  const stopVoiceInput = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-    }
-  }, []);
-
-  const stopQuestionAudio = useCallback(() => {
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.pause();
-      audioPlayerRef.current = null;
-    }
-
-    if (audioUrlRef.current) {
-      URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = null;
-    }
-
-    setIsSpeaking(false);
-  }, []);
-
   const endAgentConversation = useCallback(async () => {
     const activeConversation = conversationRef.current;
     if (!activeConversation) {
@@ -141,16 +96,9 @@ export default function VoiceCallPage() {
 
   useEffect(() => {
     return () => {
-      stopVoiceInput();
-
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-      }
-
-      stopQuestionAudio();
       void endAgentConversation();
     };
-  }, [endAgentConversation, stopQuestionAudio, stopVoiceInput]);
+  }, [endAgentConversation]);
 
   const processPendingAnswers = useCallback(async () => {
     if (queueRunningRef.current) {
@@ -261,7 +209,6 @@ export default function VoiceCallPage() {
           }
 
           appendTranscript("user", trimmedMessage);
-          setAnswer(trimmedMessage);
           pendingAnswerQueueRef.current.push(trimmedMessage);
           void processPendingAnswers();
         },
@@ -278,9 +225,9 @@ export default function VoiceCallPage() {
       setConnectionMode("fallback");
       setAgentStatus("disconnected");
       setVoiceError(agentError instanceof Error ? agentError.message : "Unable to connect to ElevenLabs agent.");
-      setVoiceInfo("Using classic voice mode as fallback.");
+      setVoiceInfo("AI interviewer is unavailable. End call and try again from voice setup.");
     }
-  }, [appendTranscript, isCallActive, processPendingAnswers, session?.id, setAnswer]);
+  }, [appendTranscript, isCallActive, processPendingAnswers, session?.id]);
 
   useEffect(() => {
     if (!isCallActive || !currentQuestion || connectionMode !== "initializing") {
@@ -319,205 +266,8 @@ export default function VoiceCallPage() {
     }
   }, [agentStatus, connectionMode, currentQuestion?.id, currentQuestion?.question, interviewLanguageLabel, isCallActive, sessionCompleted]);
 
-  async function transcribeRecordedAudio(blob: Blob): Promise<string> {
-    const token = await getAuthToken();
-    if (!token) {
-      throw new Error("Authentication token is missing.");
-    }
-
-    const formData = new FormData();
-    formData.append("audio", blob, "answer.webm");
-
-    const response = await fetch(`${apiBaseUrl}/api/voice/stt`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      body: formData,
-    });
-
-    const payload = (await response.json().catch(() => ({}))) as { text?: string; error?: string };
-    if (!response.ok) {
-      throw new Error(payload.error ?? "Failed to transcribe voice.");
-    }
-
-    return (payload.text ?? "").trim();
-  }
-
-  async function startVoiceInput() {
-    setVoiceError(null);
-    setVoiceInfo(null);
-
-    if (connectionMode !== "fallback") {
-      setVoiceError("Manual recording is only available in fallback mode.");
-      return;
-    }
-
-    if (!isCallActive) {
-      setVoiceError("Call is not active.");
-      return;
-    }
-
-    if (!recordingSupported || typeof window === "undefined") {
-      setVoiceError("Voice input is not supported in this browser.");
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-      voiceChunksRef.current = [];
-
-      const recorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          voiceChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onstop = () => {
-        void (async () => {
-          try {
-            const audioBlob = new Blob(voiceChunksRef.current, { type: "audio/webm" });
-            const transcript = await transcribeRecordedAudio(audioBlob);
-
-            if (!transcript) {
-              setVoiceError("No speech detected. Please try again.");
-              return;
-            }
-
-            appendTranscript("user", transcript);
-
-            setAnswer((previousAnswer) => {
-              const trimmed = previousAnswer.trim();
-              return trimmed ? `${trimmed} ${transcript}` : transcript;
-            });
-
-            setVoiceInfo("Voice converted to text successfully.");
-          } catch (voiceProcessError) {
-            setVoiceError(
-              voiceProcessError instanceof Error
-                ? voiceProcessError.message
-                : "Failed to process voice input.",
-            );
-          } finally {
-            if (mediaStreamRef.current) {
-              mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-              mediaStreamRef.current = null;
-            }
-
-            setIsListening(false);
-          }
-        })();
-      };
-
-      recorder.start();
-      setIsListening(true);
-    } catch {
-      setVoiceError("Microphone permission denied or unavailable.");
-    }
-  }
-
-  const speakCurrentQuestion = useCallback(async () => {
-    if (connectionMode !== "fallback") {
-      return;
-    }
-
-    setVoiceError(null);
-    setVoiceInfo(null);
-
-    if (!currentQuestion?.question) {
-      return;
-    }
-
-    try {
-      const token = await getAuthToken();
-      if (!token) {
-        throw new Error("Authentication token is missing.");
-      }
-
-      setIsSpeaking(true);
-
-      const response = await fetch(`${apiBaseUrl}/api/voice/tts`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ text: currentQuestion.question }),
-      });
-
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(payload.error ?? "Failed to generate voice output.");
-      }
-
-      const audioBlob = await response.blob();
-      const audioUrl = URL.createObjectURL(audioBlob);
-
-      stopQuestionAudio();
-
-      const player = new Audio(audioUrl);
-      audioPlayerRef.current = player;
-      audioUrlRef.current = audioUrl;
-
-      player.onended = () => {
-        setIsSpeaking(false);
-
-        if (audioUrlRef.current) {
-          URL.revokeObjectURL(audioUrlRef.current);
-          audioUrlRef.current = null;
-        }
-      };
-
-      player.onerror = () => {
-        setIsSpeaking(false);
-        setVoiceError("Unable to play generated voice.");
-
-        if (audioUrlRef.current) {
-          URL.revokeObjectURL(audioUrlRef.current);
-          audioUrlRef.current = null;
-        }
-      };
-
-      appendTranscript("agent", currentQuestion.question);
-      await player.play();
-    } catch (ttsError) {
-      setIsSpeaking(false);
-      setVoiceError(ttsError instanceof Error ? ttsError.message : "Unable to read the question aloud.");
-    }
-  }, [apiBaseUrl, appendTranscript, connectionMode, currentQuestion?.question, stopQuestionAudio]);
-
-  useEffect(() => {
-    if (connectionMode !== "fallback" || !isCallActive || !currentQuestion?.question) {
-      return;
-    }
-
-    if (lastSpokenQuestionRef.current === currentQuestion.question) {
-      return;
-    }
-
-    lastSpokenQuestionRef.current = currentQuestion.question;
-    void speakCurrentQuestion();
-  }, [connectionMode, currentQuestion?.question, isCallActive, speakCurrentQuestion]);
-
-  function retryAgentConnection() {
-    if (connectionMode !== "fallback") {
-      return;
-    }
-
-    setConnectionMode("initializing");
-    setVoiceError(null);
-    setVoiceInfo("Retrying AI interviewer connection...");
-  }
-
   function endCall() {
-    stopVoiceInput();
-    stopQuestionAudio();
     setIsCallActive(false);
-    setIsListening(false);
     setVoiceInfo("Call ended.");
     void endAgentConversation();
     router.push("/practice/voice");
@@ -533,8 +283,8 @@ export default function VoiceCallPage() {
     return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
   }
 
-  const speakingState = connectionMode === "agent" ? agentMode === "speaking" : isSpeaking;
-  const listeningState = connectionMode === "agent" ? agentMode === "listening" : isListening;
+  const speakingState = connectionMode === "agent" && agentMode === "speaking";
+  const listeningState = connectionMode === "agent" && agentMode === "listening";
 
   const statusLabel = connectionMode === "agent"
     ? agentMode === "speaking"
@@ -542,11 +292,7 @@ export default function VoiceCallPage() {
       : "Listening"
     : connectionMode === "initializing"
       ? "Connecting"
-      : isSpeaking
-        ? "Agent speaking (fallback)"
-        : isListening
-          ? "Listening (fallback)"
-          : "Fallback ready";
+      : "Disconnected";
 
   if (!currentQuestion) {
     return (
@@ -561,7 +307,7 @@ export default function VoiceCallPage() {
           </div>
           <h1 className="text-2xl font-semibold">No active voice interview</h1>
           <p className="mt-2 max-w-xl text-sm text-[var(--color-text-muted)]">
-            Prepare interview questions first from the voice setup page, then press Start call.
+            Prepare interview questions first from the voice setup page.
           </p>
           <Button onClick={openVoiceSetup} className="mt-6">
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -582,12 +328,8 @@ export default function VoiceCallPage() {
       <div className="relative z-10 flex min-h-screen flex-col px-4 py-4 md:px-8 md:py-6">
         <header className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 backdrop-blur-md">
           <div className="flex items-center gap-2">
-            <Button variant="secondary" onClick={openVoiceSetup}>
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back
-            </Button>
             <p className="text-sm text-[var(--color-text-muted)]">
-              {connectionMode === "agent" ? "ElevenLabs realtime interviewer" : "Classic voice fallback"}
+              {connectionMode === "agent" ? "ElevenLabs realtime interviewer" : "Waiting for AI interviewer"}
             </p>
           </div>
 
@@ -628,104 +370,53 @@ export default function VoiceCallPage() {
             )}
 
             {connectionMode === "agent" ? (
-              <>
-                <div>
-                  <p className="mb-2 text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Live transcript</p>
-                  <div
-                    ref={transcriptContainerRef}
-                    className="max-h-56 space-y-2 overflow-y-auto rounded-2xl border border-white/10 bg-white/[0.03] p-3"
-                  >
-                    {transcriptItems.length === 0 && (
-                      <p className="text-sm text-white/55">
-                        Transcript will appear here once conversation starts.
-                      </p>
-                    )}
-                    {transcriptItems.map((item) => (
-                      <div
-                        key={item.id}
-                        className={cn(
-                          "rounded-xl px-3 py-2 text-sm",
-                          item.role === "agent"
-                            ? "border border-cyan-300/20 bg-cyan-400/10 text-cyan-100"
-                            : "border border-white/15 bg-white/[0.04] text-white/90",
-                        )}
-                      >
-                        <p className="mb-1 text-[11px] uppercase tracking-wide opacity-70">
-                          {item.role === "agent" ? "Interviewer" : "You"}
-                        </p>
-                        <p>{item.message}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <p className="text-xs text-white/60">
-                  Answer processing is automatic. Keep speaking naturally and the app evaluates each response.
-                </p>
-
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="secondary" onClick={endCall} className="border-red-400/50 text-red-200 hover:border-red-300/70">
-                    <PhoneOff className="mr-2 h-4 w-4" />
-                    End call
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <>
-                <TextArea
-                  value={answer}
-                  onChange={(event) => setAnswer(event.target.value)}
-                  placeholder="Your answer will appear here..."
-                  className="min-h-28"
-                />
-
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="secondary"
-                    onClick={isListening ? stopVoiceInput : startVoiceInput}
-                    disabled={!isCallActive || isSpeaking || loading}
-                  >
-                    {isListening ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
-                    {isListening ? "Stop talking" : "Talk"}
-                  </Button>
-
-                  <Button
-                    variant="secondary"
-                    onClick={() => void speakCurrentQuestion()}
-                    disabled={!isCallActive || isSpeaking || isListening || loading}
-                  >
-                    <Volume2 className="mr-2 h-4 w-4" />
-                    {isSpeaking ? "Reading..." : "Replay"}
-                  </Button>
-
-                  <Button onClick={() => void submitCurrentAnswer()} disabled={loading || !answer.trim()}>
-                    <Send className="mr-2 h-4 w-4" />
-                    {loading ? "Submitting..." : "Submit answer"}
-                  </Button>
-
-                  <Button variant="secondary" onClick={goToNextQuestion} disabled={loading || isLastQuestion}>
-                    <SkipForward className="mr-2 h-4 w-4" />
-                    Next question
-                  </Button>
-
-                  {isLastQuestion && !sessionCompleted && (
-                    <Button variant="secondary" onClick={() => void completeSession()} disabled={loading}>
-                      <CheckCircle className="mr-2 h-4 w-4" />
-                      Finish session
-                    </Button>
+              <div>
+                <p className="mb-2 text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Live transcript</p>
+                <div
+                  ref={transcriptContainerRef}
+                  className="max-h-56 space-y-2 overflow-y-auto rounded-2xl border border-white/10 bg-white/[0.03] p-3"
+                >
+                  {transcriptItems.length === 0 && (
+                    <p className="text-sm text-white/55">
+                      Transcript will appear here once conversation starts.
+                    </p>
                   )}
-
-                  <Button variant="secondary" onClick={retryAgentConnection} disabled={loading}>
-                    Retry AI agent
-                  </Button>
-
-                  <Button variant="secondary" onClick={endCall} className="border-red-400/50 text-red-200 hover:border-red-300/70">
-                    <PhoneOff className="mr-2 h-4 w-4" />
-                    End call
-                  </Button>
+                  {transcriptItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className={cn(
+                        "rounded-xl px-3 py-2 text-sm",
+                        item.role === "agent"
+                          ? "border border-cyan-300/20 bg-cyan-400/10 text-cyan-100"
+                          : "border border-white/15 bg-white/[0.04] text-white/90",
+                      )}
+                    >
+                      <p className="mb-1 text-[11px] uppercase tracking-wide opacity-70">
+                        {item.role === "agent" ? "Interviewer" : "You"}
+                      </p>
+                      <p>{item.message}</p>
+                    </div>
+                  ))}
                 </div>
-              </>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                <p className="text-sm text-white/70">
+                  Voice call is fully automatic. If connection drops, end the call and restart from voice setup.
+                </p>
+              </div>
             )}
+
+            <p className="text-xs text-white/60">
+              Answer processing is automatic. Keep speaking naturally and the app evaluates each response.
+            </p>
+
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={endCall} className="border-red-400/50 text-red-200 hover:border-red-300/70">
+                <PhoneOff className="mr-2 h-4 w-4" />
+                End call
+              </Button>
+            </div>
 
             {feedback && (
               <div className="rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-3">

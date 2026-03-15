@@ -23,6 +23,7 @@ type SetupPayload = {
 
 type UseInterviewFlowOptions = {
   storageKey?: string;
+  hydrateOnLoad?: boolean;
 };
 
 type PersistedInterviewFlowState = {
@@ -38,6 +39,7 @@ type PersistedInterviewFlowState = {
 
 export function useInterviewFlow(options: UseInterviewFlowOptions = {}) {
   const storageKey = options.storageKey ?? "interview-flow";
+  const hydrateOnLoad = options.hydrateOnLoad ?? true;
 
   const [questions, setQuestions] = useState<StoredQuestion[]>([]);
   const [session, setSession] = useState<PracticeSession | null>(null);
@@ -55,6 +57,12 @@ export function useInterviewFlow(options: UseInterviewFlowOptions = {}) {
 
   useEffect(() => {
     if (typeof window === "undefined") {
+      return;
+    }
+
+    if (!hydrateOnLoad) {
+      window.sessionStorage.removeItem(storageKey);
+      setHydrated(true);
       return;
     }
 
@@ -100,7 +108,7 @@ export function useInterviewFlow(options: UseInterviewFlowOptions = {}) {
     } finally {
       setHydrated(true);
     }
-  }, [storageKey]);
+  }, [hydrateOnLoad, storageKey]);
 
   useEffect(() => {
     if (!hydrated || typeof window === "undefined") {
