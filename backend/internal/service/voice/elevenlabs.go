@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -19,6 +20,8 @@ type Service struct {
 	voiceID  string
 	ttsModel string
 	sttModel string
+	agentID  string
+	branchID string
 	baseURL  string
 	client   *http.Client
 }
@@ -27,12 +30,19 @@ type STTResult struct {
 	Text string `json:"text"`
 }
 
+type AgentSignedURLResult struct {
+	SignedURL      string `json:"signed_url"`
+	ConversationID string `json:"conversation_id,omitempty"`
+}
+
 func NewService(cfg *config.Config) *Service {
 	provider := "elevenlabs"
 	apiKey := ""
 	voiceID := "EXAVITQu4vr4xnSDxMaL"
 	ttsModel := "eleven_multilingual_v2"
 	sttModel := "scribe_v1"
+	agentID := ""
+	branchID := ""
 
 	if cfg != nil {
 		provider = strings.ToLower(strings.TrimSpace(cfg.VoiceProvider))
@@ -40,6 +50,8 @@ func NewService(cfg *config.Config) *Service {
 		voiceID = strings.TrimSpace(cfg.ElevenLabsVoiceID)
 		ttsModel = strings.TrimSpace(cfg.ElevenLabsTTSModel)
 		sttModel = strings.TrimSpace(cfg.ElevenLabsSTTModel)
+		agentID = strings.TrimSpace(cfg.ElevenLabsAgentID)
+		branchID = strings.TrimSpace(cfg.ElevenLabsAgentBranchID)
 	}
 
 	if provider == "" {
@@ -61,6 +73,8 @@ func NewService(cfg *config.Config) *Service {
 		voiceID:  voiceID,
 		ttsModel: ttsModel,
 		sttModel: sttModel,
+		agentID:  agentID,
+		branchID: branchID,
 		baseURL:  "https://api.elevenlabs.io/v1",
 		client:   &http.Client{Timeout: 45 * time.Second},
 	}
@@ -68,6 +82,60 @@ func NewService(cfg *config.Config) *Service {
 
 func (s *Service) IsReady() bool {
 	return s != nil && s.provider == "elevenlabs" && s.apiKey != ""
+}
+
+func (s *Service) AgentIsReady() bool {
+	return s.IsReady() && strings.TrimSpace(s.agentID) != ""
+}
+
+func (s *Service) GetAgentSignedURL(includeConversationID bool) (*AgentSignedURLResult, error) {
+	if !s.AgentIsReady() {
+		return nil, fmt.Errorf("elevenlabs agent is not configured")
+	}
+
+	queryValues := url.Values{}
+	queryValues.Set("agent_id", s.agentID)
+	if includeConversationID {
+		queryValues.Set("include_conversation_id", "true")
+	}
+	if strings.TrimSpace(s.branchID) != "" {
+		queryValues.Set("branch_id", s.branchID)
+	}
+
+	requestURL := fmt.Sprintf("%s/convai/conversation/get-signed-url?%s", s.baseURL, queryValues.Encode())
+	request, err := http.NewRequest(http.MethodGet, requestURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("xi-api-key", s.apiKey)
+
+	response, err := s.client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	responseBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("elevenlabs agent signed-url error: %s", strings.TrimSpace(string(responseBody)))
+	}
+
+	var parsed AgentSignedURLResult
+	if err := json.Unmarshal(responseBody, &parsed); err != nil {
+		return nil, err
+	}
+
+	if strings.TrimSpace(parsed.SignedURL) == "" {
+		return nil, fmt.Errorf("elevenlabs agent signed-url response is empty")
+	}
+
+	return &parsed, nil
 }
 
 func (s *Service) TextToSpeech(text string) ([]byte, error) {

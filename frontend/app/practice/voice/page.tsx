@@ -1,7 +1,7 @@
 "use client";
 
-import { Mic, Phone, PhoneOff, Volume2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowRight, Mic, Phone } from "lucide-react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "@/components/layout/AppShell";
@@ -11,12 +11,12 @@ import { Button } from "@/components/ui/Button";
 import { GlassCard, GradientBorderCard } from "@/components/ui/GlassCard";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { Input, TextArea } from "@/components/ui/Input";
-import { getAuthToken } from "@/lib/auth/token-provider";
 import { useInterviewFlow } from "@/hooks/useInterviewFlow";
 
 export default function VoicePracticePage() {
 	const router = useRouter();
 	const {
+		session,
 		questions,
 		currentQuestion,
 		currentIndex,
@@ -32,215 +32,12 @@ export default function VoicePracticePage() {
 		completeSession,
 		goToNextQuestion,
 		sessionCompleted,
-	} = useInterviewFlow();
+	} = useInterviewFlow({ storageKey: "interview-flow-voice" });
 	const isLastQuestion = currentIndex >= questions.length - 1;
+	const interviewLanguageLabel = session?.interview_language === "id" ? "Bahasa Indonesia" : "English";
 
-	const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api-proxy";
-	const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-	const mediaStreamRef = useRef<MediaStream | null>(null);
-	const voiceChunksRef = useRef<BlobPart[]>([]);
-	const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
-	const lastSpokenQuestionRef = useRef<string>("");
-
-	const [isCallActive, setIsCallActive] = useState(false);
-	const [isListening, setIsListening] = useState(false);
-	const [isSpeaking, setIsSpeaking] = useState(false);
-	const [voiceError, setVoiceError] = useState<string | null>(null);
-	const [voiceInfo, setVoiceInfo] = useState<string | null>(null);
-
-	const recordingSupported = useMemo(() => {
-		if (typeof window === "undefined") {
-			return false;
-		}
-		return Boolean(window.MediaRecorder && navigator.mediaDevices?.getUserMedia);
-	}, []);
-
-	const stopVoiceInput = useCallback(() => {
-		if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-			mediaRecorderRef.current.stop();
-		}
-	}, []);
-
-	const stopQuestionAudio = useCallback(() => {
-		if (audioPlayerRef.current) {
-			audioPlayerRef.current.pause();
-			audioPlayerRef.current = null;
-		}
-		setIsSpeaking(false);
-	}, []);
-
-	useEffect(() => {
-		return () => {
-			stopVoiceInput();
-			if (mediaStreamRef.current) {
-				mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-			}
-			stopQuestionAudio();
-		};
-	}, [stopQuestionAudio, stopVoiceInput]);
-
-	async function transcribeRecordedAudio(blob: Blob) {
-		const token = await getAuthToken();
-		if (!token) {
-			throw new Error("Authentication token is missing.");
-		}
-
-		const formData = new FormData();
-		formData.append("audio", blob, "answer.webm");
-
-		const response = await fetch(`${apiBaseUrl}/api/voice/stt`, {
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${token}`,
-			},
-			body: formData,
-		});
-
-		const payload = (await response.json().catch(() => ({}))) as { text?: string; error?: string };
-		if (!response.ok) {
-			throw new Error(payload.error ?? "Failed to transcribe voice.");
-		}
-
-		return (payload.text ?? "").trim();
-	}
-
-	async function startVoiceInput() {
-		setVoiceError(null);
-		setVoiceInfo(null);
-
-		if (!recordingSupported || typeof window === "undefined") {
-			setVoiceError("Voice input is not supported in this browser.");
-			return;
-		}
-
-		try {
-			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-			mediaStreamRef.current = stream;
-			voiceChunksRef.current = [];
-
-			const recorder = new MediaRecorder(stream);
-			mediaRecorderRef.current = recorder;
-
-			recorder.ondataavailable = (event) => {
-				if (event.data && event.data.size > 0) {
-					voiceChunksRef.current.push(event.data);
-				}
-			};
-
-			recorder.onstop = () => {
-				void (async () => {
-					try {
-						const audioBlob = new Blob(voiceChunksRef.current, { type: "audio/webm" });
-						const transcript = await transcribeRecordedAudio(audioBlob);
-						if (!transcript) {
-							setVoiceError("No speech detected. Please try again.");
-							return;
-						}
-						setAnswer((prev) => {
-							const trimmed = prev.trim();
-							return trimmed ? `${trimmed} ${transcript}` : transcript;
-						});
-						setVoiceInfo("Voice converted to text successfully.");
-					} catch (voiceProcessError) {
-						setVoiceError(voiceProcessError instanceof Error ? voiceProcessError.message : "Failed to process voice input.");
-					} finally {
-						if (mediaStreamRef.current) {
-							mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-							mediaStreamRef.current = null;
-						}
-						setIsListening(false);
-					}
-				})();
-			};
-
-			recorder.start();
-			setIsListening(true);
-		} catch {
-			setVoiceError("Microphone permission denied or unavailable.");
-		}
-	}
-
-	const speakCurrentQuestion = useCallback(async () => {
-		setVoiceError(null);
-		setVoiceInfo(null);
-
-		if (!currentQuestion?.question) {
-			return;
-		}
-
-		try {
-			const token = await getAuthToken();
-			if (!token) {
-				throw new Error("Authentication token is missing.");
-			}
-
-			setIsSpeaking(true);
-
-			const response = await fetch(`${apiBaseUrl}/api/voice/tts`, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					Authorization: `Bearer ${token}`,
-				},
-				body: JSON.stringify({ text: currentQuestion.question }),
-			});
-
-			if (!response.ok) {
-				const payload = (await response.json().catch(() => ({}))) as { error?: string };
-				throw new Error(payload.error ?? "Failed to generate voice output.");
-			}
-
-			const audioBlob = await response.blob();
-			const audioUrl = URL.createObjectURL(audioBlob);
-
-			stopQuestionAudio();
-
-			const player = new Audio(audioUrl);
-			audioPlayerRef.current = player;
-			player.onended = () => {
-				setIsSpeaking(false);
-				URL.revokeObjectURL(audioUrl);
-			};
-			player.onerror = () => {
-				setIsSpeaking(false);
-				setVoiceError("Unable to play generated voice.");
-				URL.revokeObjectURL(audioUrl);
-			};
-
-			await player.play();
-		} catch (ttsError) {
-			setIsSpeaking(false);
-			setVoiceError(ttsError instanceof Error ? ttsError.message : "Unable to read the question aloud.");
-		}
-	}, [apiBaseUrl, currentQuestion?.question, stopQuestionAudio]);
-
-	useEffect(() => {
-		if (!isCallActive || !currentQuestion?.question) {
-			return;
-		}
-
-		if (lastSpokenQuestionRef.current === currentQuestion.question) {
-			return;
-		}
-
-		lastSpokenQuestionRef.current = currentQuestion.question;
-		void speakCurrentQuestion();
-	}, [isCallActive, currentQuestion?.question, speakCurrentQuestion]);
-
-	function startCall() {
-		setVoiceError(null);
-		setVoiceInfo("Call connected. The interviewer will read each question automatically.");
-		setIsCallActive(true);
-		if (currentQuestion?.question) {
-			lastSpokenQuestionRef.current = "";
-		}
-	}
-
-	function endCall() {
-		stopVoiceInput();
-		stopQuestionAudio();
-		setIsCallActive(false);
-		setVoiceInfo("Call ended.");
+	function openCallScreen() {
+		router.push("/practice/voice/call");
 	}
 
 	return (
@@ -268,53 +65,35 @@ export default function VoicePracticePage() {
 					<>
 						<GradientBorderCard>
 							<div className="p-5 space-y-3">
-							<div className="flex items-center justify-between">
-								<div>
-									<h3 className="text-base font-semibold text-white">Voice call mode</h3>
-									<p className="text-sm text-[var(--color-text-muted)]">Call-style interaction (similar to ChatGPT call experience).</p>
+								<div className="flex items-center justify-between gap-3">
+									<div>
+										<h3 className="text-base font-semibold text-white">Voice call mode</h3>
+										<p className="text-sm text-[var(--color-text-muted)]">Open full-screen call interaction inspired by Siri style UI.</p>
+									</div>
+									<div className="flex flex-col items-end gap-1">
+										<span className="rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-200">
+											{sessionCompleted ? "Session completed" : "Ready"}
+										</span>
+										<span className="rounded-full border border-white/15 bg-white/[0.03] px-3 py-1 text-[11px] text-white/70">
+											Language: {interviewLanguageLabel}
+										</span>
+									</div>
 								</div>
-								<span className="rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-200">
-									{isCallActive ? (isSpeaking ? "Agent speaking" : isListening ? "You speaking" : "Connected") : "Disconnected"}
-								</span>
-							</div>
 
-							<div className="flex flex-wrap gap-2">
-								{isCallActive ? (
-									<Button variant="secondary" onClick={endCall} className="border-red-400/40 text-red-200 hover:border-red-300/70">
-										<PhoneOff className="mr-2 h-4 w-4" />
-										End call
-									</Button>
-								) : (
-									<Button onClick={startCall} className="shadow-[0_0_20px_rgba(6,182,212,0.2)]">
+								<div className="flex flex-wrap gap-2">
+									<Button onClick={openCallScreen} className="shadow-[0_0_20px_rgba(6,182,212,0.2)]">
 										<Phone className="mr-2 h-4 w-4" />
 										Start call
 									</Button>
-								)}
+									<Button variant="secondary" onClick={openCallScreen}>
+										<ArrowRight className="mr-2 h-4 w-4" />
+										Open full screen
+									</Button>
+								</div>
 
-								<Button
-									variant="secondary"
-									onClick={isListening ? stopVoiceInput : startVoiceInput}
-									disabled={!isCallActive || isSpeaking}
-								>
-									<Mic className="mr-2 h-4 w-4" />
-									{isListening ? "Stop talking" : "Talk"}
-								</Button>
-
-								<Button
-									variant="secondary"
-									onClick={speakCurrentQuestion}
-									disabled={!isCallActive || isSpeaking || isListening}
-								>
-									<Volume2 className="mr-2 h-4 w-4" />
-									{isSpeaking ? "Reading..." : "Replay question"}
-								</Button>
-							</div>
-
-							{!isCallActive && (
 								<p className="text-xs text-[var(--color-text-muted)]">
-									Start call to enable voice interaction.
+									Tap Start call to continue interview in immersive call page.
 								</p>
-							)}
 							</div>
 						</GradientBorderCard>
 
@@ -330,12 +109,8 @@ export default function VoicePracticePage() {
 						<GlassCard className="space-y-4 p-6">
 							<div className="flex items-center justify-between">
 								<h3 className="text-base font-semibold text-white">Your answer</h3>
-								<p className="text-xs text-[var(--color-text-muted)]">Type or use call controls above to speak.</p>
+								<p className="text-xs text-[var(--color-text-muted)]">Type here, or continue in call page for voice interaction.</p>
 							</div>
-
-							{voiceError && <p className="text-sm text-red-300">{voiceError}</p>}
-							{voiceInfo && <p className="text-sm text-cyan-200">{voiceInfo}</p>}
-							{isListening && <p className="text-xs text-cyan-200">Recording... click Stop talking to transcribe your response.</p>}
 
 							<TextArea
 								value={answer}
@@ -345,6 +120,10 @@ export default function VoicePracticePage() {
 							/>
 
 							<div className="flex flex-wrap gap-2">
+								<Button variant="secondary" onClick={openCallScreen}>
+									<Phone className="mr-2 h-4 w-4" />
+									Go to call screen
+								</Button>
 								<Button onClick={() => void submitCurrentAnswer()} disabled={loading || !answer.trim()}>
 									{loading ? "Submitting..." : "Submit answer"}
 								</Button>
@@ -406,13 +185,20 @@ function SetupForm({
 	loading,
 	interviewMode,
 }: {
-	onStart: (payload: { jobDescription: string; interviewMode: "text" | "voice"; targetRole: string; targetCompany: string }) => Promise<void>;
+	onStart: (payload: {
+		jobDescription: string;
+		interviewMode: "text" | "voice";
+		interviewLanguage: "id" | "en";
+		targetRole: string;
+		targetCompany: string;
+	}) => Promise<boolean>;
 	loading: boolean;
 	interviewMode: "text" | "voice";
 }) {
 	const [jobDescription, setJobDescription] = useState("");
 	const [targetRole, setTargetRole] = useState("");
 	const [targetCompany, setTargetCompany] = useState("");
+	const [interviewLanguage, setInterviewLanguage] = useState<"id" | "en">("id");
 
 	return (
 		<div className="space-y-3">
@@ -434,11 +220,23 @@ function SetupForm({
 				placeholder="Paste job description..."
 				className="min-h-28"
 			/>
+			<div className="space-y-2">
+				<p className="text-xs uppercase tracking-wide text-white/45">Interview language</p>
+				<div className="flex flex-wrap gap-2">
+					<Button type="button" variant={interviewLanguage === "id" ? "primary" : "secondary"} onClick={() => setInterviewLanguage("id")}>
+						Bahasa Indonesia
+					</Button>
+					<Button type="button" variant={interviewLanguage === "en" ? "primary" : "secondary"} onClick={() => setInterviewLanguage("en")}>
+						English
+					</Button>
+				</div>
+			</div>
 			<Button
 				onClick={() =>
 					void onStart({
 						jobDescription,
 						interviewMode,
+						interviewLanguage,
 						targetRole,
 						targetCompany,
 					})

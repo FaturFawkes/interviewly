@@ -23,9 +23,24 @@ type AnswerAnalysis struct {
 	STARFeedback string   `json:"star_feedback"`
 }
 
+// ResumeAIAnalysis represents AI summary output for uploaded CV content.
+type ResumeAIAnalysis struct {
+	Summary         string   `json:"summary"`
+	Response        string   `json:"response"`
+	Highlights      []string `json:"highlights"`
+	Recommendations []string `json:"recommendations"`
+}
+
 // AIService defines all AI-related business capabilities required by backend workflows.
 type AIService interface {
 	ParseJobDescription(jobDescription string) (*JobInsights, error)
-	GenerateQuestions(resumeText, jobDescription string) ([]GeneratedQuestion, error)
-	AnalyzeAnswer(question, answer string) (*AnswerAnalysis, error)
+	GenerateQuestions(
+		resumeText,
+		jobDescription string,
+		interviewLanguage InterviewLanguage,
+		interviewMode InterviewMode,
+		interviewDifficulty InterviewDifficulty,
+	) ([]GeneratedQuestion, error)
+	AnalyzeAnswer(question, answer string, interviewLanguage InterviewLanguage) (*AnswerAnalysis, error)
+	AnalyzeResume(resumeText string) (*ResumeAIAnalysis, error)
 }

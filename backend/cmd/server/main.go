@@ -15,6 +15,7 @@ import (
 	"github.com/interview_app/backend/internal/repository"
 	"github.com/interview_app/backend/internal/service/ai"
 	"github.com/interview_app/backend/internal/service/notification"
+	"github.com/interview_app/backend/internal/service/storage"
 	"github.com/interview_app/backend/internal/service/voice"
 	"github.com/interview_app/backend/internal/usecase"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -38,8 +39,17 @@ func main() {
 	healthUC := usecase.NewHealthUseCase(healthRepo)
 	healthHandler := handler.NewHealthHandler(healthUC)
 	aiService := ai.NewService(cfg)
+	resumeStorage, err := storage.NewMinIOResumeStorage(cfg)
+	if err != nil {
+		log.Fatalf("MinIO storage initialization failed: %v", err)
+	}
+	if resumeStorage == nil {
+		log.Println("MinIO storage disabled: MINIO env is not fully configured")
+	} else {
+		log.Println("MinIO storage initialized")
+	}
 	interviewRepo := repository.NewInterviewRepository(postgresPool)
-	interviewUC := usecase.NewInterviewUseCase(aiService, interviewRepo)
+	interviewUC := usecase.NewInterviewUseCase(aiService, interviewRepo, resumeStorage)
 	jobHandler := handler.NewJobHandler(interviewUC)
 	resumeHandler := handler.NewResumeHandler(interviewUC)
 	questionHandler := handler.NewQuestionHandler(interviewUC)

@@ -78,36 +78,131 @@ func (s *Service) ParseJobDescription(jobDescription string) (*domain.JobInsight
 	}, nil
 }
 
-func (s *Service) GenerateQuestions(resumeText, jobDescription string) ([]domain.GeneratedQuestion, error) {
+func (s *Service) GenerateQuestions(
+	resumeText,
+	jobDescription string,
+	interviewLanguage domain.InterviewLanguage,
+	interviewMode domain.InterviewMode,
+	interviewDifficulty domain.InterviewDifficulty,
+) ([]domain.GeneratedQuestion, error) {
+	interviewLanguage = domain.NormalizeInterviewLanguage(string(interviewLanguage))
+	interviewMode = domain.NormalizeInterviewMode(string(interviewMode))
+	interviewDifficulty = domain.NormalizeInterviewDifficulty(string(interviewDifficulty))
+
 	if s.useRemoteProvider() {
-		if remote, err := s.remoteGenerateQuestions(resumeText, jobDescription); err == nil {
+		if remote, err := s.remoteGenerateQuestions(
+			resumeText,
+			jobDescription,
+			interviewLanguage,
+			interviewMode,
+			interviewDifficulty,
+		); err == nil {
 			return remote, nil
 		}
 	}
 
-	resumeTokens := topKeywords(tokenize(strings.ToLower(resumeText)), 6)
-	jobTokens := topKeywords(tokenize(strings.ToLower(jobDescription)), 6)
+	totalQuestions := questionCountByMode(interviewMode)
+	behavioralCount := totalQuestions / 2
+	technicalCount := totalQuestions - behavioralCount
 
-	primaryResume := pickOrDefault(resumeTokens, 0, "your background")
+	normalizedResume := strings.ToLower(resumeText)
+	normalizedJobDescription := strings.ToLower(jobDescription)
+
+	resumeTokens := topKeywords(tokenize(normalizedResume), 6)
+	jobTokens := topKeywords(tokenize(normalizedJobDescription), 8)
+	jobSkills := detectSkills(normalizedJobDescription)
+	jobThemes := detectThemes(normalizedJobDescription)
+
+	primaryResume := pickOrDefault(resumeTokens, 0, "your relevant project background")
 	secondaryResume := pickOrDefault(resumeTokens, 1, "a key project")
-	primaryJob := pickOrDefault(jobTokens, 0, "this role")
-	secondaryJob := pickOrDefault(jobTokens, 1, "the main responsibilities")
+	primaryJobSkill := pickOrDefault(jobSkills, 0, pickOrDefault(jobTokens, 0, "the core role requirements"))
+	secondaryJobSkill := pickOrDefault(jobSkills, 1, pickOrDefault(jobTokens, 1, "the required technical stack"))
+	jobTheme := pickOrDefault(jobThemes, 0, pickOrDefault(jobTokens, 2, "the main responsibilities"))
 
-	behavioral := []domain.GeneratedQuestion{
-		{Type: "behavioral", Question: "Tell me about a time you delivered impact related to " + primaryJob + "."},
-		{Type: "behavioral", Question: "Describe a challenge you faced while working on " + secondaryResume + " and how you solved it."},
-		{Type: "behavioral", Question: "Share an example of collaborating with others to achieve a difficult goal."},
-		{Type: "behavioral", Question: "How do you prioritize tasks when deadlines are tight and priorities change?"},
-		{Type: "behavioral", Question: "Describe a situation where you received critical feedback and what actions you took."},
+	if interviewLanguage == domain.InterviewLanguageIndonesian {
+		behavioralTemplates := []string{
+			"Ceritakan pengalaman paling relevan Anda yang secara langsung mendukung kebutuhan %s pada job description ini.",
+			"Jelaskan situasi ketika Anda menghadapi tantangan pada area %s dan bagaimana Anda menyelesaikannya.",
+			"Berikan contoh kolaborasi lintas tim untuk mencapai target yang terkait dengan %s.",
+			"Dalam konteks tanggung jawab di JD ini, bagaimana Anda memprioritaskan pekerjaan saat deadline ketat?",
+			"Ceritakan feedback kritis yang pernah Anda terima saat mengerjakan %s, serta tindakan perbaikannya.",
+			"Ceritakan keputusan sulit yang pernah Anda ambil terkait prioritas pekerjaan pada area %s.",
+			"Bagaimana Anda menangani konflik ekspektasi stakeholder saat mengerjakan inisiatif %s?",
+			"Berikan contoh inisiatif proaktif Anda yang berdampak langsung pada objective tim di area %s.",
+		}
+
+		technicalTemplates := []string{
+			"Jelaskan desain sistem/fitur yang pernah Anda bangun dan relevansinya dengan kebutuhan %s pada role ini.",
+			"Jika diminta mengimplementasikan solusi untuk %s sesuai JD ini, apa pendekatan teknis Anda dari awal sampai deployment?",
+			"Trade-off apa yang Anda pertimbangkan untuk scaling layanan yang menangani %s?",
+			"Bagaimana strategi Anda melakukan debugging insiden produksi untuk layanan yang kritikal terhadap objective role ini?",
+			"Bagaimana Anda memastikan reliability, observability, dan performance pada stack yang relevan dengan %s?",
+			"Bagaimana Anda menyusun test strategy (unit/integration/e2e) untuk fitur yang terkait %s?",
+			"Jelaskan pendekatan monitoring dan incident response Anda untuk sistem dengan kebutuhan %s.",
+			"Apa pertimbangan security utama ketika membangun layanan yang memproses %s?",
+		}
+
+		behavioral := buildQuestionBatch(
+			behavioralTemplates,
+			[]string{primaryJobSkill, secondaryJobSkill, jobTheme, secondaryResume},
+			"behavioral",
+			behavioralCount,
+			interviewLanguage,
+			interviewDifficulty,
+		)
+		technical := buildQuestionBatch(
+			technicalTemplates,
+			[]string{primaryJobSkill, secondaryJobSkill, jobTheme},
+			"technical",
+			technicalCount,
+			interviewLanguage,
+			interviewDifficulty,
+		)
+
+		questions := make([]domain.GeneratedQuestion, 0, len(behavioral)+len(technical))
+		questions = append(questions, behavioral...)
+		questions = append(questions, technical...)
+		return questions, nil
 	}
 
-	technical := []domain.GeneratedQuestion{
-		{Type: "technical", Question: "Walk through a system or feature you built involving " + primaryResume + "."},
-		{Type: "technical", Question: "How would you design an API workflow for " + primaryJob + "?"},
-		{Type: "technical", Question: "What trade-offs would you consider when scaling a service handling " + secondaryJob + "?"},
-		{Type: "technical", Question: "Explain how you debug production issues in distributed systems."},
-		{Type: "technical", Question: "How do you ensure reliability, observability, and performance in backend services?"},
+	behavioralTemplates := []string{
+		"Tell me about an achievement that directly aligns with the job requirement around %s.",
+		"Describe a challenge you faced in %s and how you resolved it.",
+		"Share an example of cross-functional collaboration to deliver outcomes related to %s.",
+		"Given the responsibilities in this JD, how do you prioritize when deadlines are tight and priorities shift?",
+		"Describe critical feedback you received while working on %s and what changed afterward.",
+		"Tell me about a difficult trade-off decision you made in an initiative involving %s.",
+		"How do you handle conflicting stakeholder expectations while owning delivery in %s?",
+		"Share a proactive improvement you drove that materially impacted goals tied to %s.",
 	}
+
+	technicalTemplates := []string{
+		"Walk through a system or feature you built in %s and map it to this role's requirement in %s.",
+		"How would you design an implementation plan for %s based on this JD?",
+		"What trade-offs would you consider when scaling services that support %s?",
+		"How do you approach debugging production issues in systems similar to this role's technical scope?",
+		"How do you ensure reliability, observability, and performance for workloads tied to %s?",
+		"How would you define a practical unit/integration/e2e testing strategy for work involving %s?",
+		"What is your monitoring and incident-response approach for systems serving %s?",
+		"What security controls would you prioritize for services handling %s?",
+	}
+
+	behavioral := buildQuestionBatch(
+		behavioralTemplates,
+		[]string{primaryJobSkill, secondaryJobSkill, jobTheme, secondaryResume},
+		"behavioral",
+		behavioralCount,
+		interviewLanguage,
+		interviewDifficulty,
+	)
+	technical := buildQuestionBatch(
+		technicalTemplates,
+		[]string{primaryResume, primaryJobSkill, secondaryJobSkill, jobTheme},
+		"technical",
+		technicalCount,
+		interviewLanguage,
+		interviewDifficulty,
+	)
 
 	questions := make([]domain.GeneratedQuestion, 0, len(behavioral)+len(technical))
 	questions = append(questions, behavioral...)
@@ -116,59 +211,103 @@ func (s *Service) GenerateQuestions(resumeText, jobDescription string) ([]domain
 	return questions, nil
 }
 
-func (s *Service) AnalyzeAnswer(question, answer string) (*domain.AnswerAnalysis, error) {
+func (s *Service) AnalyzeAnswer(question, answer string, interviewLanguage domain.InterviewLanguage) (*domain.AnswerAnalysis, error) {
+	interviewLanguage = domain.NormalizeInterviewLanguage(string(interviewLanguage))
+
 	if s.useRemoteProvider() {
-		if remote, err := s.remoteAnalyzeAnswer(question, answer); err == nil {
+		if remote, err := s.remoteAnalyzeAnswer(question, answer, interviewLanguage); err == nil {
 			return remote, nil
 		}
 	}
 
 	normalizedAnswer := strings.TrimSpace(answer)
+	lowerAnswer := strings.ToLower(normalizedAnswer)
+	answerTokens := tokenize(lowerAnswer)
 	wordCount := len(strings.Fields(normalizedAnswer))
 
 	score := 45
 	strengths := make([]string, 0)
 	weaknesses := make([]string, 0)
 	improvements := make([]string, 0)
+	indonesian := interviewLanguage == domain.InterviewLanguageIndonesian
 
 	if wordCount >= 40 {
 		score += 20
-		strengths = append(strengths, "sufficient detail")
+		if indonesian {
+			strengths = append(strengths, "detail jawaban cukup")
+		} else {
+			strengths = append(strengths, "sufficient detail")
+		}
 	} else {
-		weaknesses = append(weaknesses, "answer is too brief")
-		improvements = append(improvements, "add more context and concrete details")
+		if indonesian {
+			weaknesses = append(weaknesses, "jawaban terlalu singkat")
+			improvements = append(improvements, "tambahkan konteks dan detail konkret")
+		} else {
+			weaknesses = append(weaknesses, "answer is too brief")
+			improvements = append(improvements, "add more context and concrete details")
+		}
 	}
 
-	if containsAny(normalizedAnswer, []string{"I ", "i "}) {
+	if containsAnyToken(answerTokens, []string{"i", "saya", "aku", "kami", "we"}) {
 		score += 10
-		strengths = append(strengths, "clear ownership of actions")
+		if indonesian {
+			strengths = append(strengths, "kepemilikan tindakan jelas")
+		} else {
+			strengths = append(strengths, "clear ownership of actions")
+		}
 	} else {
-		weaknesses = append(weaknesses, "ownership is unclear")
-		improvements = append(improvements, "describe your specific actions")
+		if indonesian {
+			weaknesses = append(weaknesses, "kepemilikan tindakan kurang jelas")
+			improvements = append(improvements, "jelaskan aksi spesifik yang Anda lakukan")
+		} else {
+			weaknesses = append(weaknesses, "ownership is unclear")
+			improvements = append(improvements, "describe your specific actions")
+		}
 	}
 
-	if containsAny(strings.ToLower(normalizedAnswer), []string{"result", "impact", "%", "improved", "reduced", "increased"}) {
+	if containsAny(lowerAnswer, []string{"result", "impact", "%", "improved", "reduced", "increased", "hasil", "dampak", "meningkat", "menurunkan"}) {
 		score += 15
-		strengths = append(strengths, "mentions outcome or impact")
+		if indonesian {
+			strengths = append(strengths, "menyebutkan hasil atau dampak")
+		} else {
+			strengths = append(strengths, "mentions outcome or impact")
+		}
 	} else {
-		weaknesses = append(weaknesses, "missing measurable outcomes")
-		improvements = append(improvements, "include measurable results when possible")
+		if indonesian {
+			weaknesses = append(weaknesses, "belum ada hasil terukur")
+			improvements = append(improvements, "sertakan hasil yang terukur jika memungkinkan")
+		} else {
+			weaknesses = append(weaknesses, "missing measurable outcomes")
+			improvements = append(improvements, "include measurable results when possible")
+		}
 	}
 
 	questionTokens := topKeywords(tokenize(strings.ToLower(question)), 5)
-	answerTokens := tokenize(strings.ToLower(normalizedAnswer))
+	answerTokenSet := make(map[string]struct{}, len(answerTokens))
+	for _, token := range answerTokens {
+		answerTokenSet[token] = struct{}{}
+	}
 	matchCount := 0
 	for _, token := range questionTokens {
-		if containsAny(strings.Join(answerTokens, " "), []string{token}) {
+		if _, exists := answerTokenSet[token]; exists {
 			matchCount++
 		}
 	}
 	if matchCount >= 2 {
 		score += 10
-		strengths = append(strengths, "answer is relevant to the question")
+		if indonesian {
+			strengths = append(strengths, "jawaban relevan dengan pertanyaan")
+		} else {
+			strengths = append(strengths, "answer is relevant to the question")
+		}
 	} else {
-		weaknesses = append(weaknesses, "answer drifts from the main question")
-		improvements = append(improvements, "focus directly on the asked topic")
+		if indonesian {
+			weaknesses = append(weaknesses, "jawaban kurang fokus pada inti pertanyaan")
+			improvements = append(improvements, "fokuskan jawaban langsung ke topik yang ditanya")
+		} else {
+			weaknesses = append(weaknesses, "answer drifts from the main question")
+			improvements = append(improvements, "focus directly on the asked topic")
+		}
 	}
 
 	if score > 100 {
@@ -179,16 +318,31 @@ func (s *Service) AnalyzeAnswer(question, answer string) (*domain.AnswerAnalysis
 	}
 
 	if len(strengths) == 0 {
-		strengths = append(strengths, "response provided")
+		if indonesian {
+			strengths = append(strengths, "jawaban sudah diberikan")
+		} else {
+			strengths = append(strengths, "response provided")
+		}
 	}
 	if len(weaknesses) == 0 {
-		weaknesses = append(weaknesses, "minor clarity improvements possible")
+		if indonesian {
+			weaknesses = append(weaknesses, "masih ada ruang peningkatan pada kejelasan")
+		} else {
+			weaknesses = append(weaknesses, "minor clarity improvements possible")
+		}
 	}
 	if len(improvements) == 0 {
-		improvements = append(improvements, "add clearer structure and concise takeaway")
+		if indonesian {
+			improvements = append(improvements, "gunakan struktur yang lebih jelas dengan kesimpulan singkat")
+		} else {
+			improvements = append(improvements, "add clearer structure and concise takeaway")
+		}
 	}
 
 	starFeedback := "Use STAR framing: Situation and Task in 1-2 sentences, then specific Actions you took, and end with measurable Result."
+	if indonesian {
+		starFeedback = "Gunakan format STAR: jelaskan Situation dan Task secara singkat, lalu Actions spesifik yang Anda lakukan, dan akhiri dengan Result yang terukur."
+	}
 
 	return &domain.AnswerAnalysis{
 		Score:        score,
@@ -196,6 +350,62 @@ func (s *Service) AnalyzeAnswer(question, answer string) (*domain.AnswerAnalysis
 		Weaknesses:   weaknesses,
 		Improvements: improvements,
 		STARFeedback: starFeedback,
+	}, nil
+}
+
+func (s *Service) AnalyzeResume(resumeText string) (*domain.ResumeAIAnalysis, error) {
+	if strings.TrimSpace(resumeText) == "" {
+		return nil, fmt.Errorf("resume content is required")
+	}
+
+	if s.useRemoteProvider() {
+		if remote, err := s.remoteAnalyzeResume(resumeText); err == nil {
+			return remote, nil
+		}
+	}
+
+	normalized := strings.ToLower(strings.TrimSpace(resumeText))
+	keywords := topKeywords(tokenize(normalized), 8)
+
+	primary := pickOrDefault(keywords, 0, "software development")
+	secondary := pickOrDefault(keywords, 1, "problem solving")
+	tertiary := pickOrDefault(keywords, 2, "delivery")
+
+	highlights := make([]string, 0, 5)
+	for index, keyword := range keywords {
+		if index >= 5 {
+			break
+		}
+		highlights = append(highlights, keyword)
+	}
+	if len(highlights) == 0 {
+		highlights = []string{"general engineering", "collaboration", "execution"}
+	}
+
+	recommendations := []string{
+		"Add 2-3 quantified achievements for key projects.",
+		"Highlight measurable impact using metrics (%, time, revenue, scale).",
+		"Tailor headline and recent experience toward the target role.",
+	}
+
+	if containsAny(normalized, []string{"lead", "mentoring", "ownership", "stakeholder"}) {
+		recommendations = append([]string{"Emphasize leadership outcomes and scope ownership."}, recommendations...)
+	}
+
+	summary := fmt.Sprintf(
+		"The CV indicates a profile focused on %s, %s, and %s with practical engineering exposure.",
+		primary,
+		secondary,
+		tertiary,
+	)
+
+	response := "Overall, the profile is relevant for interview preparation. Prioritize clearer impact storytelling and role-specific positioning to improve recruiter and interviewer confidence."
+
+	return &domain.ResumeAIAnalysis{
+		Summary:         summary,
+		Response:        response,
+		Highlights:      highlights,
+		Recommendations: recommendations,
 	}, nil
 }
 
@@ -232,6 +442,8 @@ func isStopWord(word string) bool {
 		"the": {}, "and": {}, "for": {}, "with": {}, "that": {}, "this": {}, "from": {},
 		"you": {}, "your": {}, "are": {}, "our": {}, "have": {}, "will": {}, "all": {},
 		"can": {}, "has": {}, "not": {}, "but": {}, "job": {}, "role": {}, "team": {},
+		"dan": {}, "yang": {}, "untuk": {}, "dengan": {}, "pada": {}, "atau": {}, "dari": {},
+		"kami": {}, "anda": {}, "dalam": {}, "ini": {}, "itu": {}, "akan": {}, "sebagai": {},
 	}
 	_, found := stopWords[word]
 	return found
@@ -338,12 +550,133 @@ func pickOrDefault(values []string, idx int, fallback string) string {
 	return fallback
 }
 
+func questionCountByMode(mode domain.InterviewMode) int {
+	if domain.NormalizeInterviewMode(string(mode)) == domain.InterviewModeVoice {
+		return 15
+	}
+
+	return 10
+}
+
+func difficultyBadge(interviewLanguage domain.InterviewLanguage, difficulty domain.InterviewDifficulty) string {
+	interviewLanguage = domain.NormalizeInterviewLanguage(string(interviewLanguage))
+	difficulty = domain.NormalizeInterviewDifficulty(string(difficulty))
+
+	if interviewLanguage == domain.InterviewLanguageIndonesian {
+		switch difficulty {
+		case domain.InterviewDifficultyEasy:
+			return "Mudah"
+		case domain.InterviewDifficultyHard:
+			return "Sulit"
+		default:
+			return "Sedang"
+		}
+	}
+
+	switch difficulty {
+	case domain.InterviewDifficultyEasy:
+		return "Easy"
+	case domain.InterviewDifficultyHard:
+		return "Hard"
+	default:
+		return "Medium"
+	}
+}
+
+func difficultyGuidance(interviewLanguage domain.InterviewLanguage, difficulty domain.InterviewDifficulty) string {
+	interviewLanguage = domain.NormalizeInterviewLanguage(string(interviewLanguage))
+	difficulty = domain.NormalizeInterviewDifficulty(string(difficulty))
+
+	if interviewLanguage == domain.InterviewLanguageIndonesian {
+		switch difficulty {
+		case domain.InterviewDifficultyEasy:
+			return "Jawaban boleh sederhana, fokus pada langkah inti."
+		case domain.InterviewDifficultyHard:
+			return "Bahas trade-off, edge case, serta dampak terukur."
+		default:
+			return "Sertakan alasan keputusan dan satu contoh konkret."
+		}
+	}
+
+	switch difficulty {
+	case domain.InterviewDifficultyEasy:
+		return "Keep the answer practical and straightforward."
+	case domain.InterviewDifficultyHard:
+		return "Cover trade-offs, edge cases, and measurable impact."
+	default:
+		return "Include decision rationale and one concrete example."
+	}
+}
+
+func fillTemplate(template string, placeholders []string) string {
+	result := template
+	if len(placeholders) == 0 {
+		placeholders = []string{"the role requirements"}
+	}
+
+	index := 0
+	for strings.Contains(result, "%s") {
+		replacement := pickOrDefault(placeholders, index%len(placeholders), "the role requirements")
+		result = strings.Replace(result, "%s", replacement, 1)
+		index++
+	}
+
+	return result
+}
+
+func buildQuestionBatch(
+	templates []string,
+	placeholders []string,
+	questionType string,
+	count int,
+	interviewLanguage domain.InterviewLanguage,
+	interviewDifficulty domain.InterviewDifficulty,
+) []domain.GeneratedQuestion {
+	if count <= 0 || len(templates) == 0 {
+		return []domain.GeneratedQuestion{}
+	}
+
+	questions := make([]domain.GeneratedQuestion, 0, count)
+	guidance := difficultyGuidance(interviewLanguage, interviewDifficulty)
+	badge := difficultyBadge(interviewLanguage, interviewDifficulty)
+
+	for index := 0; index < count; index++ {
+		template := templates[index%len(templates)]
+		questionText := strings.TrimSpace(fillTemplate(template, placeholders))
+		if strings.TrimSpace(guidance) != "" {
+			questionText = strings.TrimSpace(questionText + " " + guidance)
+		}
+
+		questions = append(questions, domain.GeneratedQuestion{
+			Type:     questionType,
+			Question: fmt.Sprintf("[%s] %s", badge, questionText),
+		})
+	}
+
+	return questions
+}
+
 func containsAny(input string, candidates []string) bool {
 	for _, candidate := range candidates {
 		if strings.Contains(input, candidate) {
 			return true
 		}
 	}
+	return false
+}
+
+func containsAnyToken(tokens []string, candidates []string) bool {
+	set := make(map[string]struct{}, len(tokens))
+	for _, token := range tokens {
+		set[token] = struct{}{}
+	}
+
+	for _, candidate := range candidates {
+		if _, exists := set[strings.ToLower(strings.TrimSpace(candidate))]; exists {
+			return true
+		}
+	}
+
 	return false
 }
 
@@ -454,9 +787,44 @@ func (s *Service) remoteParseJobDescription(jobDescription string) (*domain.JobI
 	return &result, nil
 }
 
-func (s *Service) remoteGenerateQuestions(resumeText, jobDescription string) ([]domain.GeneratedQuestion, error) {
+func (s *Service) remoteGenerateQuestions(
+	resumeText,
+	jobDescription string,
+	interviewLanguage domain.InterviewLanguage,
+	interviewMode domain.InterviewMode,
+	interviewDifficulty domain.InterviewDifficulty,
+) ([]domain.GeneratedQuestion, error) {
+	interviewLanguage = domain.NormalizeInterviewLanguage(string(interviewLanguage))
+	interviewMode = domain.NormalizeInterviewMode(string(interviewMode))
+	interviewDifficulty = domain.NormalizeInterviewDifficulty(string(interviewDifficulty))
+
+	totalQuestions := questionCountByMode(interviewMode)
+	behavioralCount := totalQuestions / 2
+	technicalCount := totalQuestions - behavioralCount
+	modeLabel := "text interview"
+	if interviewMode == domain.InterviewModeVoice {
+		modeLabel = "voice interview"
+	}
+	difficultyLabel := strings.ToUpper(string(interviewDifficulty))
+	if difficultyLabel == "" {
+		difficultyLabel = "MEDIUM"
+	}
+
+	targetLanguage := "English"
+	if interviewLanguage == domain.InterviewLanguageIndonesian {
+		targetLanguage = "Bahasa Indonesia"
+	}
+
 	systemPrompt := "You are an interview coach. Return only strict JSON."
-	userPrompt := "Generate 10 interview questions in JSON array with each item keys type and question. Include 5 behavioral and 5 technical questions tailored to the candidate CV and job description.\n\nCV:\n" + resumeText + "\n\nJob Description:\n" + jobDescription
+	userPrompt := fmt.Sprintf(
+		"Generate exactly %d interview questions in JSON array with each item containing keys type and question. Include exactly %d behavioral and %d technical questions. Context is %s. Difficulty level is %s. Every question must be clearly grounded in the provided job description responsibilities, stack, and seniority requirements. Questions must be written in %s. Return only JSON array with no markdown.",
+		totalQuestions,
+		behavioralCount,
+		technicalCount,
+		modeLabel,
+		difficultyLabel,
+		targetLanguage,
+	) + "\n\nCV:\n" + resumeText + "\n\nJob Description:\n" + jobDescription
 
 	raw, err := s.chatCompletion(systemPrompt, userPrompt)
 	if err != nil {
@@ -467,16 +835,25 @@ func (s *Service) remoteGenerateQuestions(resumeText, jobDescription string) ([]
 	if err := extractJSONArray(raw, &result); err != nil {
 		return nil, err
 	}
-	if len(result) == 0 {
-		return nil, fmt.Errorf("no generated questions")
+	if len(result) != totalQuestions {
+		return nil, fmt.Errorf("expected %d generated questions, got %d", totalQuestions, len(result))
 	}
 
 	return result, nil
 }
 
-func (s *Service) remoteAnalyzeAnswer(question, answer string) (*domain.AnswerAnalysis, error) {
+func (s *Service) remoteAnalyzeAnswer(question, answer string, interviewLanguage domain.InterviewLanguage) (*domain.AnswerAnalysis, error) {
+	interviewLanguage = domain.NormalizeInterviewLanguage(string(interviewLanguage))
+	targetLanguage := "English"
+	if interviewLanguage == domain.InterviewLanguageIndonesian {
+		targetLanguage = "Bahasa Indonesia"
+	}
+
 	systemPrompt := "You are an interview evaluator. Return only strict JSON."
-	userPrompt := "Evaluate the candidate answer and return JSON with keys score (0-100 int), strengths (array), weaknesses (array), improvements (array), star_feedback (string).\n\nQuestion:\n" + question + "\n\nAnswer:\n" + answer
+	userPrompt := fmt.Sprintf(
+		"Evaluate the candidate answer and return JSON with keys score (0-100 int), strengths (array), weaknesses (array), improvements (array), star_feedback (string). Ensure feedback language is %s and keep it concise, concrete, and tied to relevance with the interview question. Return only JSON.",
+		targetLanguage,
+	) + "\n\nQuestion:\n" + question + "\n\nAnswer:\n" + answer
 
 	raw, err := s.chatCompletion(systemPrompt, userPrompt)
 	if err != nil {
@@ -505,6 +882,36 @@ func (s *Service) remoteAnalyzeAnswer(question, answer string) (*domain.AnswerAn
 	}
 	if strings.TrimSpace(result.STARFeedback) == "" {
 		result.STARFeedback = "Use STAR framing: Situation, Task, Action, Result with measurable impact."
+	}
+
+	return &result, nil
+}
+
+func (s *Service) remoteAnalyzeResume(resumeText string) (*domain.ResumeAIAnalysis, error) {
+	systemPrompt := "You are an interview coaching assistant. Return only strict JSON."
+	userPrompt := "Analyze the following CV and return JSON with keys summary (string), response (string), highlights (array of concise strings), recommendations (array of actionable strings). Keep content concise and practical.\n\nCV:\n" + resumeText
+
+	raw, err := s.chatCompletion(systemPrompt, userPrompt)
+	if err != nil {
+		return nil, err
+	}
+
+	var result domain.ResumeAIAnalysis
+	if err := extractJSONObject(raw, &result); err != nil {
+		return nil, err
+	}
+
+	if strings.TrimSpace(result.Summary) == "" {
+		result.Summary = "CV analysis is available but summary was not generated."
+	}
+	if strings.TrimSpace(result.Response) == "" {
+		result.Response = "Please refine impact metrics and role-specific examples for stronger interview performance."
+	}
+	if len(result.Highlights) == 0 {
+		result.Highlights = []string{"general engineering profile"}
+	}
+	if len(result.Recommendations) == 0 {
+		result.Recommendations = []string{"Add measurable outcomes and tailor CV to target role."}
 	}
 
 	return &result, nil

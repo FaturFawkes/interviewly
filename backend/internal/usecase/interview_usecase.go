@@ -12,15 +12,17 @@ import (
 )
 
 type interviewUseCase struct {
-	aiService domain.AIService
-	repo      domain.InterviewRepository
+	aiService     domain.AIService
+	repo          domain.InterviewRepository
+	resumeStorage domain.ResumeFileStorage
 }
 
 // NewInterviewUseCase creates a usecase for interview business workflows.
-func NewInterviewUseCase(aiService domain.AIService, repo domain.InterviewRepository) domain.InterviewUseCase {
+func NewInterviewUseCase(aiService domain.AIService, repo domain.InterviewRepository, resumeStorage domain.ResumeFileStorage) domain.InterviewUseCase {
 	return &interviewUseCase{
-		aiService: aiService,
-		repo:      repo,
+		aiService:     aiService,
+		repo:          repo,
+		resumeStorage: resumeStorage,
 	}
 }
 
@@ -40,24 +42,139 @@ func (uc *interviewUseCase) ParseJobDescription(userID, rawDescription string) (
 	return uc.repo.SaveParsedJob(userID, rawDescription, insights)
 }
 
-func (uc *interviewUseCase) SaveResume(userID, content string) (*domain.ResumeRecord, error) {
+func (uc *interviewUseCase) SaveResume(userID string, upload domain.ResumeUpload) (*domain.ResumeRecord, error) {
 	if strings.TrimSpace(userID) == "" {
 		return nil, errors.New("user id is required")
 	}
-	if strings.TrimSpace(content) == "" {
+
+	content := strings.TrimSpace(upload.Content)
+	if content == "" {
 		return nil, errors.New("resume content is required")
 	}
 
-	return uc.repo.SaveResume(userID, content)
+	existingResume, err := uc.repo.GetLatestResume(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	oldMinIOPath := ""
+	if existingResume != nil {
+		oldMinIOPath = strings.TrimSpace(existingResume.MinIOPath)
+	}
+
+	minIOPath := oldMinIOPath
+	uploadedNewFile := false
+	if uc.resumeStorage != nil && len(upload.FileData) > 0 {
+		path, uploadErr := uc.resumeStorage.UploadResume(userID, upload.FileName, upload.ContentType, upload.FileData)
+		if uploadErr != nil {
+			return nil, uploadErr
+		}
+		minIOPath = path
+		uploadedNewFile = true
+	}
+
+	resume, err := uc.repo.SaveResume(userID, content, minIOPath)
+	if err != nil {
+		if uploadedNewFile && uc.resumeStorage != nil {
+			_ = uc.resumeStorage.DeleteResume(minIOPath)
+		}
+		return nil, err
+	}
+
+	if uploadedNewFile && uc.resumeStorage != nil && oldMinIOPath != "" && oldMinIOPath != minIOPath {
+		_ = uc.resumeStorage.DeleteResume(oldMinIOPath)
+	}
+
+	return resume, nil
 }
 
-func (uc *interviewUseCase) GenerateQuestions(userID, resumeText, jobDescription string) ([]domain.StoredQuestion, error) {
+func (uc *interviewUseCase) GetLatestResume(userID string) (*domain.ResumeRecord, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errors.New("user id is required")
+	}
+
+	return uc.repo.GetLatestResume(userID)
+}
+
+func (uc *interviewUseCase) AnalyzeResume(userID string, upload domain.ResumeUpload) (*domain.ResumeAnalysisResult, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errors.New("user id is required")
+	}
+
+	if len(upload.FileData) == 0 && strings.TrimSpace(upload.Content) == "" {
+		latestResume, err := uc.repo.GetLatestResume(userID)
+		if err != nil {
+			return nil, err
+		}
+		if latestResume == nil || strings.TrimSpace(latestResume.Content) == "" {
+			return nil, errors.New("resume not found, please upload your cv first")
+		}
+
+		analysis, err := uc.aiService.AnalyzeResume(latestResume.Content)
+		if err != nil {
+			return nil, err
+		}
+
+		return &domain.ResumeAnalysisResult{
+			Resume:   latestResume,
+			Analysis: analysis,
+		}, nil
+	}
+
+	resume, err := uc.SaveResume(userID, upload)
+	if err != nil {
+		return nil, err
+	}
+
+	analysis, err := uc.aiService.AnalyzeResume(resume.Content)
+	if err != nil {
+		return nil, err
+	}
+
+	return &domain.ResumeAnalysisResult{
+		Resume:   resume,
+		Analysis: analysis,
+	}, nil
+}
+
+func (uc *interviewUseCase) DownloadLatestResume(userID string) (*domain.ResumeFile, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errors.New("user id is required")
+	}
+
+	if uc.resumeStorage == nil {
+		return nil, errors.New("resume file storage is not configured")
+	}
+
+	resume, err := uc.repo.GetLatestResume(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if resume == nil || strings.TrimSpace(resume.MinIOPath) == "" {
+		return nil, errors.New("no uploaded cv file found for download")
+	}
+
+	return uc.resumeStorage.DownloadResume(resume.MinIOPath)
+}
+
+func (uc *interviewUseCase) GenerateQuestions(
+	userID,
+	resumeText,
+	jobDescription string,
+	interviewLanguage domain.InterviewLanguage,
+	interviewMode domain.InterviewMode,
+	interviewDifficulty domain.InterviewDifficulty,
+) ([]domain.StoredQuestion, error) {
 	if strings.TrimSpace(userID) == "" {
 		return nil, errors.New("user id is required")
 	}
 	if strings.TrimSpace(jobDescription) == "" {
 		return nil, errors.New("job description is required")
 	}
+	interviewLanguage = domain.NormalizeInterviewLanguage(string(interviewLanguage))
+	interviewMode = domain.NormalizeInterviewMode(string(interviewMode))
+	interviewDifficulty = domain.NormalizeInterviewDifficulty(string(interviewDifficulty))
 
 	var resume *domain.ResumeRecord
 	var err error
@@ -71,7 +188,7 @@ func (uc *interviewUseCase) GenerateQuestions(userID, resumeText, jobDescription
 		}
 		resumeText = resume.Content
 	} else {
-		resume, err = uc.repo.SaveResume(userID, resumeText)
+		resume, err = uc.repo.SaveResume(userID, resumeText, "")
 		if err != nil {
 			return nil, err
 		}
@@ -87,7 +204,13 @@ func (uc *interviewUseCase) GenerateQuestions(userID, resumeText, jobDescription
 		return nil, err
 	}
 
-	generated, err := uc.aiService.GenerateQuestions(resumeText, jobDescription)
+	generated, err := uc.aiService.GenerateQuestions(
+		resumeText,
+		jobDescription,
+		interviewLanguage,
+		interviewMode,
+		interviewDifficulty,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -117,6 +240,7 @@ func (uc *interviewUseCase) CreatePracticeSession(userID, resumeID, jobParseID s
 		return nil, errors.New("interview mode must be text or voice")
 	}
 	metadata.InterviewMode = mode
+	metadata.InterviewLanguage = domain.NormalizeInterviewLanguage(string(metadata.InterviewLanguage))
 	metadata.TargetRole = strings.TrimSpace(metadata.TargetRole)
 	metadata.TargetCompany = strings.TrimSpace(metadata.TargetCompany)
 
@@ -167,7 +291,7 @@ func (uc *interviewUseCase) SubmitSessionAnswer(userID, sessionID, questionID, a
 	return uc.repo.SaveSessionAnswer(userID, sessionID, questionID, answer)
 }
 
-func (uc *interviewUseCase) GenerateFeedback(userID, sessionID, questionID, question, answer string) (*domain.FeedbackRecord, error) {
+func (uc *interviewUseCase) GenerateFeedback(userID, sessionID, questionID, question, answer string, interviewLanguage domain.InterviewLanguage) (*domain.FeedbackRecord, error) {
 	if strings.TrimSpace(userID) == "" {
 		return nil, errors.New("user id is required")
 	}
@@ -183,8 +307,9 @@ func (uc *interviewUseCase) GenerateFeedback(userID, sessionID, questionID, ques
 	if strings.TrimSpace(answer) == "" {
 		return nil, errors.New("answer is required")
 	}
+	interviewLanguage = domain.NormalizeInterviewLanguage(string(interviewLanguage))
 
-	analysis, err := uc.aiService.AnalyzeAnswer(question, answer)
+	analysis, err := uc.aiService.AnalyzeAnswer(question, answer, interviewLanguage)
 	if err != nil {
 		return nil, err
 	}

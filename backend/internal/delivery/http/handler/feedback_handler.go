@@ -9,10 +9,11 @@ import (
 )
 
 type generateFeedbackRequest struct {
-	SessionID  string `json:"session_id" binding:"required"`
-	QuestionID string `json:"question_id" binding:"required"`
-	Question   string `json:"question" binding:"required"`
-	Answer     string `json:"answer" binding:"required"`
+	SessionID         string `json:"session_id" binding:"required"`
+	QuestionID        string `json:"question_id" binding:"required"`
+	Question          string `json:"question" binding:"required"`
+	Answer            string `json:"answer" binding:"required"`
+	InterviewLanguage string `json:"interview_language"`
 }
 
 // FeedbackHandler handles feedback APIs.
@@ -50,6 +51,7 @@ func (h *FeedbackHandler) GenerateFeedback(c *gin.Context) {
 		req.QuestionID,
 		req.Question,
 		req.Answer,
+		domain.NormalizeInterviewLanguage(req.InterviewLanguage),
 	)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

@@ -17,8 +17,25 @@ export type ResumeRecord = {
   id: string;
   user_id: string;
   content: string;
+  minio_path?: string;
   created_at: string;
 };
+
+export type ResumeAIAnalysis = {
+  summary: string;
+  response: string;
+  highlights: string[];
+  recommendations: string[];
+};
+
+export type ResumeAnalysisResponse = {
+  resume: ResumeRecord;
+  analysis: ResumeAIAnalysis;
+};
+
+export type InterviewLanguage = "id" | "en";
+export type InterviewMode = "text" | "voice";
+export type InterviewDifficulty = "easy" | "medium" | "hard";
 
 export type StoredQuestion = {
   id: string;
@@ -41,7 +58,8 @@ export type PracticeSession = {
   user_id: string;
   resume_id: string;
   job_parse_id: string;
-  interview_mode: "text" | "voice";
+  interview_mode: InterviewMode;
+  interview_language: InterviewLanguage;
   target_role?: string;
   target_company?: string;
   question_ids: string[];
@@ -52,13 +70,19 @@ export type PracticeSession = {
 };
 
 export type SessionStartMetadata = {
-  interview_mode?: "text" | "voice";
+  interview_mode?: InterviewMode;
+  interview_language?: InterviewLanguage;
   target_role?: string;
   target_company?: string;
 };
 
 export type SessionHistoryResponse = {
   sessions: PracticeSession[];
+};
+
+export type VoiceAgentSession = {
+  signed_url: string;
+  conversation_id?: string;
 };
 
 export type SessionAnswer = {

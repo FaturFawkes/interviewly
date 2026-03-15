@@ -13,6 +13,10 @@ type voiceTTSRequest struct {
 	Text string `json:"text" binding:"required"`
 }
 
+type voiceAgentSessionRequest struct {
+	IncludeConversationID bool `json:"include_conversation_id"`
+}
+
 type VoiceHandler struct {
 	service *voice.Service
 }
@@ -76,6 +80,30 @@ func (h *VoiceHandler) SpeechToText(c *gin.Context) {
 	}
 
 	result, err := h.service.SpeechToText(audioBytes, fileHeader.Filename)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// CreateAgentSession handles POST /api/voice/agent/session.
+func (h *VoiceHandler) CreateAgentSession(c *gin.Context) {
+	if h.service == nil || !h.service.AgentIsReady() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "elevenlabs agent is not configured"})
+		return
+	}
+
+	req := voiceAgentSessionRequest{}
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	result, err := h.service.GetAgentSignedURL(req.IncludeConversationID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

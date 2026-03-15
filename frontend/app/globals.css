@@ -132,3 +132,271 @@ body {
   border-color: rgba(0, 229, 255, 0.8);
   box-shadow: 0 0 0 3px rgba(0, 229, 255, 0.17);
 }
+
+.voice-liquid-orb {
+  position: relative;
+  display: flex;
+  width: 290px;
+  height: 290px;
+  align-items: center;
+  justify-content: center;
+  isolation: isolate;
+}
+
+@media (min-width: 640px) {
+  .voice-liquid-orb {
+    width: 340px;
+    height: 340px;
+  }
+}
+
+.voice-aurora {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+.voice-aurora--outer {
+  inset: -18%;
+  opacity: 0.82;
+  filter: blur(40px);
+  background:
+    conic-gradient(
+      from 60deg,
+      rgba(0, 229, 255, 0.34),
+      rgba(59, 130, 246, 0.36),
+      rgba(167, 139, 250, 0.42),
+      rgba(45, 212, 191, 0.33),
+      rgba(0, 229, 255, 0.34)
+    );
+  animation: voice-aurora-spin 8.5s linear infinite;
+}
+
+.voice-aurora--inner {
+  inset: -8%;
+  opacity: 0.68;
+  filter: blur(24px);
+  background:
+    radial-gradient(circle at 25% 25%, rgba(196, 181, 253, 0.48), transparent 55%),
+    radial-gradient(circle at 76% 30%, rgba(103, 232, 249, 0.44), transparent 54%),
+    radial-gradient(circle at 50% 78%, rgba(59, 130, 246, 0.38), transparent 58%);
+  animation: voice-aurora-drift 6.8s ease-in-out infinite;
+}
+
+.voice-ripple-stack {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.voice-ripple-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 1px solid rgba(186, 230, 253, 0.38);
+  opacity: 0;
+  animation: voice-ripple 2.8s ease-out infinite;
+}
+
+.voice-liquid-core {
+  position: relative;
+  width: 176px;
+  height: 176px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 58% 42% 64% 36% / 43% 60% 40% 57%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow:
+    0 0 46px rgba(6, 182, 212, 0.28),
+    inset 0 0 36px rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(14px);
+  animation:
+    voice-liquid-morph 7.5s ease-in-out infinite,
+    voice-liquid-drift 6.2s ease-in-out infinite;
+}
+
+@media (min-width: 640px) {
+  .voice-liquid-core {
+    width: 208px;
+    height: 208px;
+  }
+}
+
+.voice-liquid-surface {
+  position: absolute;
+  inset: -16%;
+  background:
+    radial-gradient(circle at 24% 24%, rgba(224, 231, 255, 0.46), transparent 46%),
+    radial-gradient(circle at 77% 34%, rgba(103, 232, 249, 0.48), transparent 45%),
+    radial-gradient(circle at 60% 78%, rgba(59, 130, 246, 0.46), transparent 52%),
+    conic-gradient(
+      from 130deg,
+      rgba(125, 211, 252, 0.26),
+      rgba(147, 197, 253, 0.28),
+      rgba(196, 181, 253, 0.25),
+      rgba(45, 212, 191, 0.27),
+      rgba(125, 211, 252, 0.26)
+    );
+  animation: voice-liquid-flow 6.5s linear infinite;
+}
+
+.voice-liquid-sheen {
+  position: absolute;
+  width: 85%;
+  height: 50%;
+  top: 8%;
+  left: -12%;
+  border-radius: 9999px;
+  background: linear-gradient(120deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0));
+  filter: blur(8px);
+  transform: rotate(-18deg);
+  animation: voice-sheen-shift 5.8s ease-in-out infinite;
+}
+
+.voice-liquid-inner-ring {
+  position: absolute;
+  inset: 22%;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+}
+
+.voice-liquid-inner-ring--small {
+  inset: 34%;
+  border-color: rgba(255, 255, 255, 0.34);
+}
+
+.voice-liquid-orb--speaking .voice-liquid-core {
+  box-shadow:
+    0 0 66px rgba(0, 229, 255, 0.42),
+    0 0 110px rgba(139, 92, 246, 0.24),
+    inset 0 0 40px rgba(255, 255, 255, 0.16);
+  animation-duration: 4.6s, 3.6s;
+}
+
+.voice-liquid-orb--speaking .voice-liquid-surface {
+  animation-duration: 3.2s;
+}
+
+.voice-liquid-orb--speaking .voice-ripple-ring {
+  border-color: rgba(176, 253, 255, 0.58);
+  animation-duration: 1.9s;
+}
+
+.voice-liquid-orb--listening .voice-liquid-core {
+  box-shadow:
+    0 0 52px rgba(196, 181, 253, 0.35),
+    inset 0 0 34px rgba(255, 255, 255, 0.14);
+}
+
+.voice-liquid-orb--listening .voice-ripple-ring {
+  border-color: rgba(216, 180, 254, 0.44);
+  animation-duration: 2.4s;
+}
+
+.voice-liquid-orb--inactive .voice-aurora,
+.voice-liquid-orb--inactive .voice-ripple-ring,
+.voice-liquid-orb--inactive .voice-liquid-core,
+.voice-liquid-orb--inactive .voice-liquid-surface,
+.voice-liquid-orb--inactive .voice-liquid-sheen {
+  animation-play-state: paused;
+}
+
+.voice-liquid-orb--inactive .voice-aurora,
+.voice-liquid-orb--inactive .voice-ripple-ring {
+  opacity: 0.18;
+}
+
+@keyframes voice-aurora-spin {
+  0% {
+    transform: rotate(0deg) scale(1);
+    filter: blur(40px) hue-rotate(0deg);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.08);
+    filter: blur(48px) hue-rotate(34deg);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+    filter: blur(40px) hue-rotate(0deg);
+  }
+}
+
+@keyframes voice-aurora-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(8px, -10px, 0) scale(1.07);
+  }
+}
+
+@keyframes voice-ripple {
+  0% {
+    transform: scale(0.62);
+    opacity: 0;
+  }
+  28% {
+    opacity: 0.48;
+  }
+  100% {
+    transform: scale(1.18);
+    opacity: 0;
+  }
+}
+
+@keyframes voice-liquid-morph {
+  0%,
+  100% {
+    border-radius: 58% 42% 64% 36% / 43% 60% 40% 57%;
+  }
+  25% {
+    border-radius: 44% 56% 39% 61% / 58% 40% 60% 42%;
+  }
+  50% {
+    border-radius: 62% 38% 49% 51% / 45% 55% 45% 55%;
+  }
+  75% {
+    border-radius: 39% 61% 54% 46% / 53% 42% 58% 47%;
+  }
+}
+
+@keyframes voice-liquid-drift {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-6px) scale(1.02);
+  }
+}
+
+@keyframes voice-liquid-flow {
+  0% {
+    transform: rotate(0deg) scale(1.04);
+    filter: hue-rotate(0deg);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.1);
+    filter: hue-rotate(30deg);
+  }
+  100% {
+    transform: rotate(360deg) scale(1.04);
+    filter: hue-rotate(0deg);
+  }
+}
+
+@keyframes voice-sheen-shift {
+  0%,
+  100% {
+    transform: translateX(0) rotate(-18deg);
+    opacity: 0.52;
+  }
+  50% {
+    transform: translateX(18px) rotate(-8deg);
+    opacity: 0.78;
+  }
+}

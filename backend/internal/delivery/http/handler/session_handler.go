@@ -9,12 +9,13 @@ import (
 )
 
 type startSessionRequest struct {
-	ResumeID      string   `json:"resume_id" binding:"required"`
-	JobParseID    string   `json:"job_parse_id" binding:"required"`
-	QuestionIDs   []string `json:"question_ids" binding:"required"`
-	InterviewMode string   `json:"interview_mode"`
-	TargetRole    string   `json:"target_role"`
-	TargetCompany string   `json:"target_company"`
+	ResumeID          string   `json:"resume_id" binding:"required"`
+	JobParseID        string   `json:"job_parse_id" binding:"required"`
+	QuestionIDs       []string `json:"question_ids" binding:"required"`
+	InterviewMode     string   `json:"interview_mode"`
+	InterviewLanguage string   `json:"interview_language"`
+	TargetRole        string   `json:"target_role"`
+	TargetCompany     string   `json:"target_company"`
 }
 
 type submitAnswerRequest struct {
@@ -57,9 +58,10 @@ func (h *SessionHandler) StartSession(c *gin.Context) {
 	}
 
 	session, err := h.interviewUC.CreatePracticeSession(userID, req.ResumeID, req.JobParseID, req.QuestionIDs, domain.SessionMetadata{
-		InterviewMode: req.InterviewMode,
-		TargetRole:    req.TargetRole,
-		TargetCompany: req.TargetCompany,
+		InterviewMode:     req.InterviewMode,
+		InterviewLanguage: domain.NormalizeInterviewLanguage(req.InterviewLanguage),
+		TargetRole:        req.TargetRole,
+		TargetCompany:     req.TargetCompany,
 	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

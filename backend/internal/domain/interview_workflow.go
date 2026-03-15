@@ -1,12 +1,69 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 const (
 	SessionStatusActive    = "active"
 	SessionStatusCompleted = "completed"
 	SessionStatusAbandoned = "abandoned"
 )
+
+type InterviewLanguage string
+
+const (
+	InterviewLanguageEnglish    InterviewLanguage = "en"
+	InterviewLanguageIndonesian InterviewLanguage = "id"
+)
+
+type InterviewMode string
+
+const (
+	InterviewModeText  InterviewMode = "text"
+	InterviewModeVoice InterviewMode = "voice"
+)
+
+type InterviewDifficulty string
+
+const (
+	InterviewDifficultyEasy   InterviewDifficulty = "easy"
+	InterviewDifficultyMedium InterviewDifficulty = "medium"
+	InterviewDifficultyHard   InterviewDifficulty = "hard"
+)
+
+func NormalizeInterviewLanguage(raw string) InterviewLanguage {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	switch InterviewLanguage(normalized) {
+	case InterviewLanguageIndonesian:
+		return InterviewLanguageIndonesian
+	default:
+		return InterviewLanguageEnglish
+	}
+}
+
+func NormalizeInterviewMode(raw string) InterviewMode {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	switch InterviewMode(normalized) {
+	case InterviewModeVoice:
+		return InterviewModeVoice
+	default:
+		return InterviewModeText
+	}
+}
+
+func NormalizeInterviewDifficulty(raw string) InterviewDifficulty {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	switch InterviewDifficulty(normalized) {
+	case InterviewDifficultyEasy:
+		return InterviewDifficultyEasy
+	case InterviewDifficultyHard:
+		return InterviewDifficultyHard
+	default:
+		return InterviewDifficultyMedium
+	}
+}
 
 // ParsedJobDescription stores one parsed job description and its extracted insights.
 type ParsedJobDescription struct {
@@ -22,7 +79,29 @@ type ResumeRecord struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
 	Content   string    `json:"content"`
+	MinIOPath string    `json:"minio_path,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// ResumeUpload stores parsed resume text and optional original file payload.
+type ResumeUpload struct {
+	Content     string
+	FileName    string
+	ContentType string
+	FileData    []byte
+}
+
+// ResumeFile contains downloadable CV object data.
+type ResumeFile struct {
+	FileName    string
+	ContentType string
+	Data        []byte
+}
+
+// ResumeAnalysisResult combines persisted resume record and AI analysis output.
+type ResumeAnalysisResult struct {
+	Resume   *ResumeRecord     `json:"resume"`
+	Analysis *ResumeAIAnalysis `json:"analysis"`
 }
 
 // StoredQuestion represents one generated question persisted by backend.
@@ -38,24 +117,26 @@ type StoredQuestion struct {
 
 // PracticeSession represents one interview practice lifecycle.
 type PracticeSession struct {
-	ID            string     `json:"id"`
-	UserID        string     `json:"user_id"`
-	ResumeID      string     `json:"resume_id"`
-	JobParseID    string     `json:"job_parse_id"`
-	InterviewMode string     `json:"interview_mode"`
-	TargetRole    string     `json:"target_role,omitempty"`
-	TargetCompany string     `json:"target_company,omitempty"`
-	QuestionIDs   []string   `json:"question_ids"`
-	Status        string     `json:"status"`
-	Score         int        `json:"score"`
-	CreatedAt     time.Time  `json:"created_at"`
-	CompletedAt   *time.Time `json:"completed_at,omitempty"`
+	ID                string            `json:"id"`
+	UserID            string            `json:"user_id"`
+	ResumeID          string            `json:"resume_id"`
+	JobParseID        string            `json:"job_parse_id"`
+	InterviewMode     string            `json:"interview_mode"`
+	InterviewLanguage InterviewLanguage `json:"interview_language"`
+	TargetRole        string            `json:"target_role,omitempty"`
+	TargetCompany     string            `json:"target_company,omitempty"`
+	QuestionIDs       []string          `json:"question_ids"`
+	Status            string            `json:"status"`
+	Score             int               `json:"score"`
+	CreatedAt         time.Time         `json:"created_at"`
+	CompletedAt       *time.Time        `json:"completed_at,omitempty"`
 }
 
 type SessionMetadata struct {
-	InterviewMode string `json:"interview_mode"`
-	TargetRole    string `json:"target_role"`
-	TargetCompany string `json:"target_company"`
+	InterviewMode     string            `json:"interview_mode"`
+	InterviewLanguage InterviewLanguage `json:"interview_language"`
+	TargetRole        string            `json:"target_role"`
+	TargetCompany     string            `json:"target_company"`
 }
 
 // SessionAnswer represents one submitted answer in an interview session.
@@ -114,7 +195,7 @@ type AnalyticsPoint struct {
 // InterviewRepository defines data persistence required by interview workflows.
 type InterviewRepository interface {
 	SaveParsedJob(userID, rawDescription string, insights *JobInsights) (*ParsedJobDescription, error)
-	SaveResume(userID, content string) (*ResumeRecord, error)
+	SaveResume(userID, content, minIOPath string) (*ResumeRecord, error)
 	GetLatestResume(userID string) (*ResumeRecord, error)
 	SaveGeneratedQuestions(userID, resumeID, jobParseID string, questions []GeneratedQuestion) ([]StoredQuestion, error)
 	CreatePracticeSession(userID, resumeID, jobParseID string, questionIDs []string, metadata SessionMetadata) (*PracticeSession, error)
@@ -130,14 +211,31 @@ type InterviewRepository interface {
 // InterviewUseCase defines interview workflows.
 type InterviewUseCase interface {
 	ParseJobDescription(userID, rawDescription string) (*ParsedJobDescription, error)
-	SaveResume(userID, content string) (*ResumeRecord, error)
-	GenerateQuestions(userID, resumeText, jobDescription string) ([]StoredQuestion, error)
+	SaveResume(userID string, upload ResumeUpload) (*ResumeRecord, error)
+	GetLatestResume(userID string) (*ResumeRecord, error)
+	AnalyzeResume(userID string, upload ResumeUpload) (*ResumeAnalysisResult, error)
+	DownloadLatestResume(userID string) (*ResumeFile, error)
+	GenerateQuestions(
+		userID,
+		resumeText,
+		jobDescription string,
+		interviewLanguage InterviewLanguage,
+		interviewMode InterviewMode,
+		interviewDifficulty InterviewDifficulty,
+	) ([]StoredQuestion, error)
 	CreatePracticeSession(userID, resumeID, jobParseID string, questionIDs []string, metadata SessionMetadata) (*PracticeSession, error)
 	ListPracticeSessions(userID string) ([]PracticeSession, error)
 	CompletePracticeSession(userID, sessionID string) (*PracticeSession, error)
 	SubmitSessionAnswer(userID, sessionID, questionID, answer string) (*SessionAnswer, error)
-	GenerateFeedback(userID, sessionID, questionID, question, answer string) (*FeedbackRecord, error)
+	GenerateFeedback(userID, sessionID, questionID, question, answer string, interviewLanguage InterviewLanguage) (*FeedbackRecord, error)
 	AggregateProgress(userID string) (*ProgressMetrics, error)
 	GetProgress(userID string) (*ProgressMetrics, error)
 	GetAnalyticsOverview(userID string) (*AnalyticsOverview, error)
+}
+
+// ResumeFileStorage defines object storage for original CV files.
+type ResumeFileStorage interface {
+	UploadResume(userID, fileName, contentType string, data []byte) (string, error)
+	DownloadResume(minIOPath string) (*ResumeFile, error)
+	DeleteResume(minIOPath string) error
 }

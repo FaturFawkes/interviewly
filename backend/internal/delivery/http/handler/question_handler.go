@@ -9,8 +9,11 @@ import (
 )
 
 type generateQuestionsRequest struct {
-	ResumeText     string `json:"resume_text"`
-	JobDescription string `json:"job_description" binding:"required"`
+	ResumeText          string `json:"resume_text"`
+	JobDescription      string `json:"job_description" binding:"required"`
+	InterviewLanguage   string `json:"interview_language"`
+	InterviewMode       string `json:"interview_mode"`
+	InterviewDifficulty string `json:"interview_difficulty"`
 }
 
 // QuestionHandler handles question generation APIs.
@@ -42,7 +45,14 @@ func (h *QuestionHandler) GenerateQuestions(c *gin.Context) {
 		return
 	}
 
-	questions, err := h.interviewUC.GenerateQuestions(userID, req.ResumeText, req.JobDescription)
+	questions, err := h.interviewUC.GenerateQuestions(
+		userID,
+		req.ResumeText,
+		req.JobDescription,
+		domain.NormalizeInterviewLanguage(req.InterviewLanguage),
+		domain.NormalizeInterviewMode(req.InterviewMode),
+		domain.NormalizeInterviewDifficulty(req.InterviewDifficulty),
+	)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, ChevronLeft, LayoutDashboard, Mic, Sparkles, Upload } from "lucide-react";
+import { signOut } from "next-auth/react";
+import { BarChart3, ChevronLeft, LayoutDashboard, LogOut, Mic, Settings, Sparkles, Upload } from "lucide-react";
 import { useState } from "react";
 
 import { cn } from "@/lib/utils";
@@ -22,6 +23,22 @@ type SidebarProps = {
 export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  async function handleLogout() {
+    if (loggingOut) {
+      return;
+    }
+
+    setLoggingOut(true);
+
+    try {
+      onClose();
+      await signOut({ callbackUrl: "/" });
+    } finally {
+      setLoggingOut(false);
+    }
+  }
 
   return (
     <>
@@ -77,13 +94,28 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
           })}
         </nav>
 
-        {!collapsed && (
-          <div className="p-3 border-t border-white/[0.06]">
-            <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-white/40">
-              UI synced with design baseline
-            </div>
-          </div>
-        )}
+        <div className="p-3 border-t border-white/[0.06] space-y-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 text-white/50 hover:text-white/80 hover:bg-white/[0.04]"
+            aria-label="Open settings"
+          >
+            <Settings className="w-4 h-4 shrink-0" />
+            {!collapsed && <span className="text-sm whitespace-nowrap">Setting</span>}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void handleLogout()}
+            disabled={loggingOut}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 text-white/50 hover:text-white/80 hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-60"
+            aria-label="Logout"
+          >
+            <LogOut className="w-4 h-4 shrink-0" />
+            {!collapsed && <span className="text-sm whitespace-nowrap">{loggingOut ? "Logging out..." : "Logout"}</span>}
+          </button>
+        </div>
       </aside>
 
       {mobileOpen && (

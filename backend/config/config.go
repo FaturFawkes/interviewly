@@ -35,6 +35,14 @@ type Config struct {
 	ElevenLabsVoiceID             string
 	ElevenLabsTTSModel            string
 	ElevenLabsSTTModel            string
+	ElevenLabsAgentID             string
+	ElevenLabsAgentBranchID       string
+	MinIOEndpoint                 string
+	MinIOAccessKey                string
+	MinIOSecretKey                string
+	MinIOBucket                   string
+	MinIORegion                   string
+	MinIOUseSSL                   bool
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -67,6 +75,14 @@ func Load() *Config {
 		ElevenLabsVoiceID:             getEnv("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL"),
 		ElevenLabsTTSModel:            getEnv("ELEVENLABS_TTS_MODEL", "eleven_multilingual_v2"),
 		ElevenLabsSTTModel:            getEnv("ELEVENLABS_STT_MODEL", "scribe_v1"),
+		ElevenLabsAgentID:             getEnv("ELEVENLABS_AGENT_ID", ""),
+		ElevenLabsAgentBranchID:       getEnv("ELEVENLABS_AGENT_BRANCH_ID", ""),
+		MinIOEndpoint:                 getEnv("MINIO_ENDPOINT", ""),
+		MinIOAccessKey:                getEnv("MINIO_ACCESS_KEY", ""),
+		MinIOSecretKey:                getEnv("MINIO_SECRET_KEY", ""),
+		MinIOBucket:                   getEnv("MINIO_BUCKET", "interview-cv"),
+		MinIORegion:                   getEnv("MINIO_REGION", "us-east-1"),
+		MinIOUseSSL:                   getEnvBool("MINIO_USE_SSL", false),
 	}
 }
 
@@ -104,4 +120,18 @@ func getEnvInt32(key string, fallback int32) int32 {
 	}
 
 	return int32(parsed)
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	value := strings.ToLower(strings.TrimSpace(getEnv(key, "")))
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
 }

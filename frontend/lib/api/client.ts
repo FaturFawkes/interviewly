@@ -9,8 +9,9 @@ type RequestOptions = Omit<RequestInit, "body"> & {
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const token = await getAuthToken();
   const headers = new Headers(options.headers);
+  const isFormDataBody = typeof FormData !== "undefined" && options.body instanceof FormData;
 
-  if (!headers.has("Content-Type")) {
+  if (!isFormDataBody && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
@@ -21,7 +22,9 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    body: options.body !== undefined
+      ? (isFormDataBody ? (options.body as FormData) : JSON.stringify(options.body))
+      : undefined,
     cache: "no-store",
   });
 
