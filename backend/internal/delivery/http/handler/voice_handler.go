@@ -25,7 +25,6 @@ func NewVoiceHandler(service *voice.Service) *VoiceHandler {
 	return &VoiceHandler{service: service}
 }
 
-// TextToSpeech handles POST /api/voice/tts.
 func (h *VoiceHandler) TextToSpeech(c *gin.Context) {
 	if h.service == nil || !h.service.IsReady() {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "elevenlabs voice service is not configured"})
@@ -53,7 +52,6 @@ func (h *VoiceHandler) TextToSpeech(c *gin.Context) {
 	c.Data(http.StatusOK, "audio/mpeg", audio)
 }
 
-// SpeechToText handles POST /api/voice/stt.
 func (h *VoiceHandler) SpeechToText(c *gin.Context) {
 	if h.service == nil || !h.service.IsReady() {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "elevenlabs voice service is not configured"})
@@ -88,7 +86,6 @@ func (h *VoiceHandler) SpeechToText(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-// CreateAgentSession handles POST /api/voice/agent/session.
 func (h *VoiceHandler) CreateAgentSession(c *gin.Context) {
 	if h.service == nil || !h.service.AgentIsReady() {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "elevenlabs agent is not configured"})

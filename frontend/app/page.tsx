@@ -1,296 +1,165 @@
 import Link from "next/link";
-import { ArrowRight, BarChart3, Brain, Check, FileSearch, MessageSquare, Shield, Sparkles, Star, Zap } from "lucide-react";
+import { ArrowRight, Brain, ChartNoAxesCombined, FileText, Sparkles } from "lucide-react";
 
 import { Navbar } from "@/components/layout/Navbar";
-import { GlassCard, GradientBorderCard } from "@/components/ui/GlassCard";
-import { GradientButton } from "@/components/ui/GradientButton";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 import { testimonials } from "@/lib/mock-data";
 
 const featureItems = [
   {
-    icon: MessageSquare,
     title: "AI Mock Interviews",
-    description: "Practice with an AI interviewer that adapts to your role and experience level.",
-    color: "from-purple-500 to-purple-700",
-  },
-  {
-    icon: FileSearch,
-    title: "JD Analysis",
-    description: "Upload any job description and get targeted interview questions instantly.",
-    color: "from-blue-500 to-blue-700",
-  },
-  {
-    icon: BarChart3,
-    title: "Feedback Scoring",
-    description: "Get detailed scoring on communication, technical depth, and confidence.",
-    color: "from-cyan-500 to-cyan-700",
-  },
-  {
+    desc: "Practice realistic interview questions personalized to your resume and target role.",
     icon: Brain,
-    title: "Smart Prep Plans",
-    description: "AI-generated practice plans based on your strengths and weaknesses.",
-    color: "from-violet-500 to-violet-700",
   },
   {
-    icon: Zap,
-    title: "Real-time Feedback",
-    description: "Instant suggestions to improve your answers as you practice.",
-    color: "from-indigo-500 to-indigo-700",
+    title: "JD Analysis",
+    desc: "Extract skills, keywords, and themes from job descriptions to align answers better.",
+    icon: FileText,
   },
   {
-    icon: Shield,
-    title: "Industry Coverage",
-    description: "From tech to finance — questions tailored to your target industry.",
-    color: "from-teal-500 to-teal-700",
-  },
-];
-
-const pricingPlans = [
-  {
-    name: "Free",
-    price: "$0",
-    period: "forever",
-    features: ["3 mock interviews/month", "Basic feedback", "1 JD analysis", "Community support"],
-    highlighted: false,
-  },
-  {
-    name: "Pro",
-    price: "$19",
-    period: "/month",
-    features: ["Unlimited mock interviews", "Detailed AI feedback", "Unlimited JD analysis", "Progress analytics", "Priority support", "Custom practice plans"],
-    highlighted: true,
-  },
-  {
-    name: "Enterprise",
-    price: "$49",
-    period: "/month",
-    features: ["Everything in Pro", "Team management", "Bulk interview sessions", "API access", "Dedicated account manager", "Custom integrations"],
-    highlighted: false,
+    title: "Feedback Scoring",
+    desc: "Get instant scoring, strengths, weaknesses, and STAR improvements after every answer.",
+    icon: ChartNoAxesCombined,
   },
 ];
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-[#0B0F14] text-white overflow-x-hidden relative">
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full bg-purple-600/[0.07] blur-[120px]" />
-        <div className="absolute top-[30%] right-[-15%] w-[500px] h-[500px] rounded-full bg-cyan-500/[0.05] blur-[120px]" />
-        <div className="absolute bottom-[-10%] left-[30%] w-[400px] h-[400px] rounded-full bg-blue-600/[0.06] blur-[120px]" />
-      </div>
+    <div className="relative min-h-screen overflow-hidden pb-10">
+      <div className="ambient-orb orb-primary -left-20 top-6 h-64 w-64" />
+      <div className="ambient-orb orb-cyan right-0 top-44 h-72 w-72" />
 
       <Navbar />
 
-      <main className="relative z-10">
-        <section className="max-w-7xl mx-auto px-8 pt-20 pb-32 text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-purple-500/20 bg-purple-500/[0.08] text-purple-300 text-sm mb-8">
-            <Sparkles className="w-3.5 h-3.5" />
-            Powered by GPT-4 & advanced AI
-          </div>
-          <h1 className="text-5xl md:text-7xl tracking-tight mb-6 bg-gradient-to-br from-white via-white/90 to-white/50 bg-clip-text text-transparent max-w-4xl mx-auto leading-[1.1]">
-            Ace Your Next Interview with AI
-          </h1>
-          <p className="text-lg text-white/50 max-w-2xl mx-auto mb-10 leading-relaxed">
-            Practice with an AI interviewer, get instant feedback, and track your progress.
-            Land your dream job with confidence.
-          </p>
-          <div className="flex items-center justify-center gap-4">
-            <Link href="/dashboard">
-              <GradientButton size="lg">
-                Start Practicing Interviews
-                <ArrowRight className="w-5 h-5 ml-2 inline" />
-              </GradientButton>
-            </Link>
-            <GradientButton variant="outline" size="lg">Watch Demo</GradientButton>
+      <main className="section-shell relative z-10 space-y-16 pb-10 pt-8 sm:space-y-20 sm:pt-12">
+        <section className="grid items-center gap-10 lg:grid-cols-2">
+          <div className="space-y-6">
+            <p className="inline-flex items-center gap-2 rounded-full border border-white/15 px-3 py-1 text-xs font-semibold text-cyan-200">
+              <Sparkles className="h-3.5 w-3.5" />
+              AI-powered career acceleration
+            </p>
+
+            <h1 className="text-4xl font-bold leading-tight tracking-tight text-white sm:text-5xl lg:text-6xl">
+              Practice interviews with your <span className="gradient-text">AI Interview Coach</span>
+            </h1>
+
+            <p className="max-w-xl text-base leading-relaxed text-[var(--color-text-muted)] sm:text-lg">
+              Turn any job description into a focused mock interview flow, receive instant coaching, and track
+              readiness with premium analytics.
+            </p>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Link href="/practice">
+                <Button className="gap-2">
+                  Start practicing interviews
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+              <Link href="/dashboard">
+                <Button variant="secondary">View dashboard</Button>
+              </Link>
+            </div>
           </div>
 
-          <div className="mt-20">
-            <GradientBorderCard className="max-w-5xl mx-auto">
-              <div className="p-8 rounded-2xl">
-                <div className="bg-[#080B10] rounded-xl p-6 border border-white/[0.04]">
-                  <div className="flex items-center gap-2 mb-6">
-                    <div className="w-3 h-3 rounded-full bg-red-500/60" />
-                    <div className="w-3 h-3 rounded-full bg-yellow-500/60" />
-                    <div className="w-3 h-3 rounded-full bg-green-500/60" />
-                    <span className="text-white/30 text-xs ml-2">AI Interview Coach — Mock Session</span>
-                  </div>
-                  <div className="grid md:grid-cols-2 gap-6">
-                    <div className="space-y-4">
-                      <div className="p-4 rounded-xl bg-purple-500/[0.08] border border-purple-500/20 text-left">
-                        <p className="text-sm text-purple-300 mb-1">AI Interviewer</p>
-                        <p className="text-white/80 text-sm">Tell me about a time you had to lead a project under tight deadlines. How did you handle it?</p>
-                      </div>
-                      <div className="p-4 rounded-xl bg-white/[0.03] border border-white/[0.06] text-left">
-                        <p className="text-sm text-cyan-300 mb-1">Your Answer</p>
-                        <p className="text-white/60 text-sm">In my previous role at Acme Corp, I led a 5-person team to deliver a critical feature...</p>
-                      </div>
-                    </div>
-                    <div className="space-y-4 text-left">
-                      <div className="p-4 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-                        <p className="text-sm text-cyan-400 mb-3">Live Feedback</p>
-                        <div className="space-y-3">
-                          <MetricBar label="Clarity" value="92%" width="w-[92%]" color="from-purple-500 to-cyan-400" />
-                          <MetricBar label="Relevance" value="87%" width="w-[87%]" color="from-blue-500 to-purple-500" />
-                          <MetricBar label="Depth" value="78%" width="w-[78%]" color="from-cyan-500 to-blue-500" />
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3 p-3 rounded-xl bg-green-500/[0.08] border border-green-500/20">
-                        <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
-                          <BarChart3 className="w-5 h-5 text-green-400" />
-                        </div>
-                        <div>
-                          <p className="text-green-400 text-sm">Overall Score</p>
-                          <p className="text-white text-lg">86/100</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+          <Card className="relative min-h-[320px] overflow-hidden rounded-[24px] p-6">
+            <div className="absolute inset-0 grid-overlay opacity-25" />
+            <div className="relative space-y-4">
+              <p className="text-sm text-[var(--color-text-muted)]">Live product preview</p>
+              <div className="grid gap-3">
+                <PreviewRow title="Interview readiness" value="82%" />
+                <PreviewRow title="Latest score" value="88" />
+                <PreviewRow title="Weak area" value="STAR structure" />
               </div>
-            </GradientBorderCard>
-          </div>
-        </section>
-
-        <section id="features" className="relative z-10 max-w-7xl mx-auto px-8 py-24">
-          <div className="text-center mb-16">
-            <p className="text-purple-400 text-sm mb-3 tracking-wide uppercase">Features</p>
-            <h2 className="text-3xl md:text-4xl tracking-tight mb-4">Everything you need to ace your interview</h2>
-            <p className="text-white/40 max-w-xl mx-auto">Comprehensive AI-powered tools to prepare, practice, and perfect your interview skills.</p>
-          </div>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {featureItems.map((feature, i) => (
-              <GlassCard glowColor={i % 3 === 0 ? "purple" : i % 3 === 1 ? "blue" : "cyan"} className="p-6 h-full" key={feature.title}>
-                <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${feature.color} flex items-center justify-center mb-4`}>
-                  <feature.icon className="w-5 h-5 text-white" />
-                </div>
-                <h3 className="text-white mb-2">{feature.title}</h3>
-                <p className="text-white/40 text-sm leading-relaxed">{feature.description}</p>
-              </GlassCard>
-            ))}
-          </div>
-        </section>
-
-        <section id="testimonials" className="relative z-10 max-w-7xl mx-auto px-8 py-24">
-          <div className="text-center mb-16">
-            <p className="text-cyan-400 text-sm mb-3 tracking-wide uppercase">Testimonials</p>
-            <h2 className="text-3xl md:text-4xl tracking-tight mb-4">Loved by thousands of job seekers</h2>
-          </div>
-          <div className="grid md:grid-cols-3 gap-5">
-            {testimonials.slice(0, 3).map((item) => (
-              <GlassCard key={item.name} className="p-6 h-full">
-                <div className="flex gap-1 mb-4">
-                  {Array.from({ length: 5 }).map((_, index) => (
-                    <Star key={`${item.name}-${index}`} className="w-4 h-4 text-yellow-400 fill-yellow-400" />
-                  ))}
-                </div>
-                <p className="text-white/70 text-sm mb-6 leading-relaxed">&ldquo;{item.quote}&rdquo;</p>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500/50 to-cyan-500/50 flex items-center justify-center text-sm text-white">
-                    {item.name.split(" ").map((value) => value[0]).join("")}
-                  </div>
-                  <div>
-                    <p className="text-white text-sm">{item.name}</p>
-                    <p className="text-white/40 text-xs">{item.role}</p>
-                  </div>
-                </div>
-              </GlassCard>
-            ))}
-          </div>
-        </section>
-
-        <section id="pricing" className="relative z-10 max-w-7xl mx-auto px-8 py-24">
-          <div className="text-center mb-16">
-            <p className="text-purple-400 text-sm mb-3 tracking-wide uppercase">Pricing</p>
-            <h2 className="text-3xl md:text-4xl tracking-tight mb-4">Simple, transparent pricing</h2>
-            <p className="text-white/40 max-w-xl mx-auto">Start free, upgrade when you&apos;re ready. No hidden fees.</p>
-          </div>
-          <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            {pricingPlans.map((plan) => (
-              <div key={plan.name}>
-                {plan.highlighted ? (
-                  <GradientBorderCard>
-                    <div className="p-7">
-                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/15 text-purple-300 text-xs mb-4">
-                        <Sparkles className="w-3 h-3" /> Most Popular
-                      </div>
-                      <h3 className="text-white text-xl mb-1">{plan.name}</h3>
-                      <div className="flex items-baseline gap-1 mb-6">
-                        <span className="text-4xl text-white">{plan.price}</span>
-                        <span className="text-white/40 text-sm">{plan.period}</span>
-                      </div>
-                      <Link href="/dashboard">
-                        <GradientButton fullWidth className="mb-6">Get Started</GradientButton>
-                      </Link>
-                      <ul className="space-y-3">
-                        {plan.features.map((feature) => (
-                          <li key={feature} className="flex items-center gap-2.5 text-sm text-white/60">
-                            <Check className="w-4 h-4 text-purple-400 shrink-0" />
-                            {feature}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </GradientBorderCard>
-                ) : (
-                  <GlassCard className="p-7 h-full">
-                    <h3 className="text-white text-xl mb-1">{plan.name}</h3>
-                    <div className="flex items-baseline gap-1 mb-6">
-                      <span className="text-4xl text-white">{plan.price}</span>
-                      <span className="text-white/40 text-sm">{plan.period}</span>
-                    </div>
-                    <Link href="/dashboard">
-                      <GradientButton variant="outline" fullWidth className="mb-6">Get Started</GradientButton>
-                    </Link>
-                    <ul className="space-y-3">
-                      {plan.features.map((feature) => (
-                        <li key={feature} className="flex items-center gap-2.5 text-sm text-white/60">
-                          <Check className="w-4 h-4 text-white/30 shrink-0" />
-                          {feature}
-                        </li>
-                      ))}
-                    </ul>
-                  </GlassCard>
-                )}
+              <div className="mt-4 rounded-[16px] border border-cyan-300/30 bg-cyan-400/10 p-4 text-sm text-cyan-100">
+                AI suggests: “Anchor answer with measurable impact and close with role relevance.”
               </div>
-            ))}
-          </div>
+            </div>
+          </Card>
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-3">
+          {featureItems.map(({ title, desc, icon: Icon }) => (
+            <Card key={title} className="rounded-[20px] p-5">
+              <div className="mb-4 inline-flex rounded-[14px] border border-cyan-300/35 bg-cyan-400/10 p-2 text-cyan-200">
+                <Icon className="h-4 w-4" />
+              </div>
+              <h3 className="text-lg font-semibold text-white">{title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--color-text-muted)]">{desc}</p>
+            </Card>
+          ))}
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-3">
+          {[
+            ["1", "Paste resume + JD", "Upload your target role context and experience."],
+            ["2", "Generate interview", "AI creates tailored technical and behavioral questions."],
+            ["3", "Get scored feedback", "Improve with actionable STAR-based coaching."],
+          ].map(([step, title, desc]) => (
+            <Card key={title} className="rounded-[20px] p-5">
+              <p className="text-sm font-semibold text-cyan-300">Step {step}</p>
+              <h3 className="mt-2 text-lg font-semibold text-white">{title}</h3>
+              <p className="mt-2 text-sm text-[var(--color-text-muted)]">{desc}</p>
+            </Card>
+          ))}
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-3">
+          {testimonials.map((item) => (
+            <Card key={item.name} className="rounded-[20px] p-5">
+              <p className="text-sm leading-relaxed text-white/90">“{item.quote}”</p>
+              <div className="mt-4">
+                <p className="text-sm font-semibold text-white">{item.name}</p>
+                <p className="text-xs text-[var(--color-text-muted)]">{item.role}</p>
+              </div>
+            </Card>
+          ))}
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-2">
+          <Card className="rounded-[24px] p-6">
+            <h3 className="text-xl font-semibold text-white">Starter</h3>
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">For focused solo prep</p>
+            <p className="mt-5 text-4xl font-bold text-white">$19</p>
+            <p className="text-xs text-[var(--color-text-muted)]">per month</p>
+            <ul className="mt-5 space-y-2 text-sm text-white/90">
+              <li>• 30 interview sessions/month</li>
+              <li>• AI scoring + STAR feedback</li>
+              <li>• Progress analytics dashboard</li>
+            </ul>
+          </Card>
+          <Card className="glow-border rounded-[24px] p-6">
+            <p className="inline-flex rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-200">
+              Most popular
+            </p>
+            <h3 className="mt-3 text-xl font-semibold text-white">Pro Career Boost</h3>
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">For high-intent job seekers</p>
+            <p className="mt-5 text-4xl font-bold text-white">$39</p>
+            <p className="text-xs text-[var(--color-text-muted)]">per month</p>
+            <ul className="mt-5 space-y-2 text-sm text-white/90">
+              <li>• Unlimited sessions</li>
+              <li>• Deep role-fit analysis</li>
+              <li>• Priority AI response speed</li>
+            </ul>
+          </Card>
         </section>
       </main>
 
-      <footer className="relative z-10 border-t border-white/[0.06] mt-12">
-        <div className="max-w-7xl mx-auto px-8 py-12 flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-500 to-cyan-400 flex items-center justify-center">
-              <Sparkles className="w-4 h-4 text-white" />
-            </div>
-            <span className="text-white/60 text-sm">AI Interview Coach</span>
-          </div>
-          <p className="text-white/30 text-sm">&copy; 2026 AI Interview Coach. All rights reserved.</p>
+      <footer className="section-shell relative z-10 border-t border-white/10 pt-7 pb-5 text-sm text-[var(--color-text-muted)]">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p>© 2026 AI Interview Coach</p>
+          <p>Built for modern job seekers.</p>
         </div>
       </footer>
     </div>
   );
 }
 
-function MetricBar({
-  label,
-  value,
-  width,
-  color,
-}: {
-  label: string;
-  value: string;
-  width: string;
-  color: string;
-}) {
+function PreviewRow({ title, value }: { title: string; value: string }) {
   return (
-    <div>
-      <div className="flex justify-between text-xs text-white/50 mb-1">
-        <span>{label}</span>
-        <span>{value}</span>
-      </div>
-      <div className="h-1.5 rounded-full bg-white/[0.06]">
-        <div className={`h-full ${width} rounded-full bg-gradient-to-r ${color}`} />
-      </div>
+    <div className="flex items-center justify-between rounded-[16px] border border-white/10 bg-white/5 px-4 py-3">
+      <p className="text-sm text-[var(--color-text-muted)]">{title}</p>
+      <p className="text-sm font-semibold text-white">{value}</p>
     </div>
   );
 }

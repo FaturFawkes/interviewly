@@ -1,4 +1,4 @@
-import { GlassCard } from "@/components/ui/GlassCard";
+import { Card } from "@/components/ui/Card";
 
 type ChartCardProps = {
   title: string;
@@ -8,12 +8,12 @@ type ChartCardProps = {
 
 export function ChartCard({ title, subtitle, children }: ChartCardProps) {
   return (
-    <GlassCard className="p-6">
-      <div className="mb-5">
-        <h3 className="text-white">{title}</h3>
-        {subtitle && <p className="mt-0.5 text-sm text-white/40">{subtitle}</p>}
+    <Card className="rounded-[20px] p-5">
+      <div className="mb-4">
+        <h3 className="text-base font-semibold text-white">{title}</h3>
+        {subtitle && <p className="mt-1 text-sm text-[var(--color-text-muted)]">{subtitle}</p>}
       </div>
-      <div className="h-[240px]">{children}</div>
-    </GlassCard>
+      <div className="h-64">{children}</div>
+    </Card>
   );
 }

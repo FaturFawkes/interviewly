@@ -1,3 +1,0 @@
-DROP INDEX IF EXISTS idx_app_feedback_user_created_at;
-DROP INDEX IF EXISTS idx_app_practice_sessions_user_status_created_at;
-DROP INDEX IF EXISTS idx_app_practice_sessions_user_created_at;

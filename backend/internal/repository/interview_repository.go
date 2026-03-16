@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"errors"
-	"sort"
 	"sync"
 	"time"
 
@@ -79,12 +78,12 @@ func (r *interviewRepository) SaveParsedJob(userID, rawDescription string, insig
 	return parsed, nil
 }
 
-func (r *interviewRepository) SaveResume(userID, content, minIOPath string) (*domain.ResumeRecord, error) {
+func (r *interviewRepository) SaveResume(userID, content string) (*domain.ResumeRecord, error) {
 	now := time.Now().UTC()
 	resume := &domain.ResumeRecord{
+		ID:        uuid.NewString(),
 		UserID:    userID,
 		Content:   content,
-		MinIOPath: minIOPath,
 		CreatedAt: now,
 	}
 
@@ -92,109 +91,25 @@ func (r *interviewRepository) SaveResume(userID, content, minIOPath string) (*do
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+		_, err := r.pool.Exec(
+			ctx,
+			`INSERT INTO app_resumes
+				(id, user_id, content, created_at)
+			 VALUES
+				($1, $2, $3, $4)`,
+			resume.ID,
+			resume.UserID,
+			resume.Content,
+			resume.CreatedAt,
+		)
 		if err == nil {
-			defer tx.Rollback(ctx)
-
-			rows, queryErr := tx.Query(
-				ctx,
-				`SELECT id
-				   FROM app_resumes
-				  WHERE user_id = $1
-				  ORDER BY created_at DESC`,
-				userID,
-			)
-			if queryErr == nil {
-				resumeIDs := make([]string, 0)
-				for rows.Next() {
-					var id string
-					if scanErr := rows.Scan(&id); scanErr == nil {
-						resumeIDs = append(resumeIDs, id)
-					}
-				}
-				rows.Close()
-
-				if len(resumeIDs) == 0 {
-					resume.ID = uuid.NewString()
-					_, err = tx.Exec(
-						ctx,
-						`INSERT INTO app_resumes
-							(id, user_id, content, minio_path, created_at)
-						 VALUES
-							($1, $2, $3, $4, $5)`,
-						resume.ID,
-						resume.UserID,
-						resume.Content,
-						resume.MinIOPath,
-						resume.CreatedAt,
-					)
-				} else {
-					resume.ID = resumeIDs[0]
-					_, err = tx.Exec(
-						ctx,
-						`UPDATE app_resumes
-						    SET content = $2,
-						        minio_path = $3,
-						        created_at = $4
-						  WHERE id = $1`,
-						resume.ID,
-						resume.Content,
-						resume.MinIOPath,
-						resume.CreatedAt,
-					)
-					if err == nil {
-						_, err = tx.Exec(
-							ctx,
-							`DELETE FROM app_resumes
-							  WHERE user_id = $1 AND id <> $2`,
-							userID,
-							resume.ID,
-						)
-					}
-				}
-
-				if err == nil {
-					err = tx.Commit(ctx)
-				}
-				if err == nil {
-					return resume, nil
-				}
-			}
+			return resume, nil
 		}
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	var latestID string
-	var latestTime time.Time
-	userResumeIDs := make([]string, 0)
-	for id, record := range r.resumes {
-		if record.UserID != userID {
-			continue
-		}
-		userResumeIDs = append(userResumeIDs, id)
-		if latestID == "" || record.CreatedAt.After(latestTime) {
-			latestID = id
-			latestTime = record.CreatedAt
-		}
-	}
-
-	if latestID == "" {
-		resume.ID = uuid.NewString()
-		r.resumes[resume.ID] = resume
-		return resume, nil
-	}
-
-	resume.ID = latestID
 	r.resumes[resume.ID] = resume
-	for _, id := range userResumeIDs {
-		if id == resume.ID {
-			continue
-		}
-		delete(r.resumes, id)
-	}
-
 	return resume, nil
 }
 
@@ -206,7 +121,7 @@ func (r *interviewRepository) GetLatestResume(userID string) (*domain.ResumeReco
 		var resume domain.ResumeRecord
 		err := r.pool.QueryRow(
 			ctx,
-			`SELECT id, user_id, content, COALESCE(minio_path, ''), created_at
+			`SELECT id, user_id, content, created_at
 			   FROM app_resumes
 			  WHERE user_id = $1
 			  ORDER BY created_at DESC
@@ -216,7 +131,6 @@ func (r *interviewRepository) GetLatestResume(userID string) (*domain.ResumeReco
 			&resume.ID,
 			&resume.UserID,
 			&resume.Content,
-			&resume.MinIOPath,
 			&resume.CreatedAt,
 		)
 		if err == nil {
@@ -293,32 +207,36 @@ func (r *interviewRepository) SaveGeneratedQuestions(userID, resumeID, jobParseI
 	return stored, nil
 }
 
-func (r *interviewRepository) CreatePracticeSession(userID, resumeID, jobParseID string, questionIDs []string, metadata domain.SessionMetadata) (*domain.PracticeSession, error) {
+func (r *interviewRepository) CreatePracticeSession(
+	userID,
+	resumeID,
+	jobParseID string,
+	questionIDs []string,
+	metadata domain.SessionMetadata,
+) (*domain.PracticeSession, error) {
 	if err := r.validateSessionCreationReferences(userID, resumeID, jobParseID, questionIDs); err != nil {
 		return nil, err
 	}
 
+	normalizedMode := string(domain.NormalizeInterviewMode(metadata.InterviewMode))
+	normalizedLanguage := string(domain.NormalizeInterviewLanguage(string(metadata.InterviewLanguage)))
+	normalizedDifficulty := string(domain.NormalizeInterviewDifficulty(string(metadata.InterviewDifficulty)))
+
 	now := time.Now().UTC()
 	session := &domain.PracticeSession{
-		ID:                uuid.NewString(),
-		UserID:            userID,
-		ResumeID:          resumeID,
-		JobParseID:        jobParseID,
-		InterviewMode:     metadata.InterviewMode,
-		InterviewLanguage: metadata.InterviewLanguage,
-		TargetRole:        metadata.TargetRole,
-		TargetCompany:     metadata.TargetCompany,
-		QuestionIDs:       append([]string{}, questionIDs...),
-		Status:            domain.SessionStatusActive,
-		Score:             0,
-		CreatedAt:         now,
-	}
-
-	if session.InterviewMode == "" {
-		session.InterviewMode = "text"
-	}
-	if session.InterviewLanguage == "" {
-		session.InterviewLanguage = domain.InterviewLanguageEnglish
+		ID:                  uuid.NewString(),
+		UserID:              userID,
+		ResumeID:            resumeID,
+		JobParseID:          jobParseID,
+		QuestionIDs:         append([]string{}, questionIDs...),
+		InterviewMode:       normalizedMode,
+		InterviewLanguage:   normalizedLanguage,
+		InterviewDifficulty: normalizedDifficulty,
+		TargetRole:          metadata.TargetRole,
+		TargetCompany:       metadata.TargetCompany,
+		Status:              domain.SessionStatusActive,
+		Score:               0,
+		CreatedAt:           now,
 	}
 
 	if r.pool != nil {
@@ -328,18 +246,19 @@ func (r *interviewRepository) CreatePracticeSession(userID, resumeID, jobParseID
 		_, err := r.pool.Exec(
 			ctx,
 			`INSERT INTO app_practice_sessions
-				(id, user_id, resume_id, job_parse_id, interview_mode, interview_language, target_role, target_company, question_ids, status, score, created_at)
+				(id, user_id, resume_id, job_parse_id, question_ids, interview_mode, interview_language, interview_difficulty, target_role, target_company, status, score, created_at)
 			 VALUES
-				($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+				($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 			session.ID,
 			session.UserID,
 			session.ResumeID,
 			session.JobParseID,
+			session.QuestionIDs,
 			session.InterviewMode,
 			session.InterviewLanguage,
+			session.InterviewDifficulty,
 			session.TargetRole,
 			session.TargetCompany,
-			session.QuestionIDs,
 			session.Status,
 			session.Score,
 			session.CreatedAt,
@@ -362,7 +281,7 @@ func (r *interviewRepository) ListPracticeSessions(userID string) ([]domain.Prac
 
 		rows, err := r.pool.Query(
 			ctx,
-			`SELECT id, user_id, resume_id, job_parse_id, interview_mode, interview_language, target_role, target_company, question_ids, status, score, created_at, completed_at
+			`SELECT id, user_id, resume_id, job_parse_id, question_ids, interview_mode, interview_language, interview_difficulty, target_role, target_company, status, score, created_at, completed_at
 			   FROM app_practice_sessions
 			  WHERE user_id = $1
 			  ORDER BY created_at DESC`,
@@ -379,11 +298,12 @@ func (r *interviewRepository) ListPracticeSessions(userID string) ([]domain.Prac
 					&session.UserID,
 					&session.ResumeID,
 					&session.JobParseID,
+					&session.QuestionIDs,
 					&session.InterviewMode,
 					&session.InterviewLanguage,
+					&session.InterviewDifficulty,
 					&session.TargetRole,
 					&session.TargetCompany,
-					&session.QuestionIDs,
 					&session.Status,
 					&session.Score,
 					&session.CreatedAt,
@@ -406,60 +326,40 @@ func (r *interviewRepository) ListPracticeSessions(userID string) ([]domain.Prac
 		}
 	}
 
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].CreatedAt.After(result[j].CreatedAt)
-	})
-
 	return result, nil
 }
 
 func (r *interviewRepository) CompletePracticeSession(userID, sessionID string) (*domain.PracticeSession, error) {
+	completedAt := time.Now().UTC()
+
 	if r.pool != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-
-		var score float64
-		var feedbackCount int
-		if err := r.pool.QueryRow(
-			ctx,
-			`SELECT COALESCE(AVG(score), 0), COUNT(*)
-			   FROM app_feedback
-			  WHERE user_id = $1 AND session_id = $2`,
-			userID,
-			sessionID,
-		).Scan(&score, &feedbackCount); err != nil {
-			return nil, err
-		}
-
-		if feedbackCount == 0 {
-			return nil, errors.New("cannot complete session without feedback")
-		}
-
-		finalScore := int(score + 0.5)
 
 		var session domain.PracticeSession
 		err := r.pool.QueryRow(
 			ctx,
 			`UPDATE app_practice_sessions
-			    SET status = $3,
-			        score = $4,
-			        completed_at = COALESCE(completed_at, NOW())
-			  WHERE id = $1 AND user_id = $2
-			  RETURNING id, user_id, resume_id, job_parse_id, interview_mode, interview_language, target_role, target_company, question_ids, status, score, created_at, completed_at`,
+			    SET status = $1,
+			        completed_at = $2
+			  WHERE id = $3
+			    AND user_id = $4
+			RETURNING id, user_id, resume_id, job_parse_id, question_ids, interview_mode, interview_language, interview_difficulty, target_role, target_company, status, score, created_at, completed_at`,
+			domain.SessionStatusCompleted,
+			completedAt,
 			sessionID,
 			userID,
-			domain.SessionStatusCompleted,
-			finalScore,
 		).Scan(
 			&session.ID,
 			&session.UserID,
 			&session.ResumeID,
 			&session.JobParseID,
+			&session.QuestionIDs,
 			&session.InterviewMode,
 			&session.InterviewLanguage,
+			&session.InterviewDifficulty,
 			&session.TargetRole,
 			&session.TargetCompany,
-			&session.QuestionIDs,
 			&session.Status,
 			&session.Score,
 			&session.CreatedAt,
@@ -468,10 +368,6 @@ func (r *interviewRepository) CompletePracticeSession(userID, sessionID string) 
 		if err == nil {
 			return &session, nil
 		}
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, errors.New("session not found")
-		}
-		return nil, err
 	}
 
 	r.mu.Lock()
@@ -482,26 +378,11 @@ func (r *interviewRepository) CompletePracticeSession(userID, sessionID string) 
 		return nil, errors.New("session not found")
 	}
 
-	total := 0
-	count := 0
-	for _, item := range r.feedbacks {
-		if item.UserID == userID && item.SessionID == sessionID {
-			total += item.Score
-			count++
-		}
-	}
-	if count == 0 {
-		return nil, errors.New("cannot complete session without feedback")
-	}
-
 	session.Status = domain.SessionStatusCompleted
-	session.Score = int(float64(total)/float64(count) + 0.5)
-	now := time.Now().UTC()
-	session.CompletedAt = &now
+	session.CompletedAt = &completedAt
 	r.sessions[sessionID] = session
 
-	copy := session
-	return &copy, nil
+	return &session, nil
 }
 
 func (r *interviewRepository) SaveSessionAnswer(userID, sessionID, questionID, answer string) (*domain.SessionAnswer, error) {

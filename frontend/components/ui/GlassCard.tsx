@@ -14,18 +14,27 @@ const glowClassByColor: Record<GlowColor, string> = {
 };
 
 export function GlassCard({ className, glowColor = "none", ...props }: GlassCardProps) {
-  return <div className={cn("glass-card rounded-[20px]", glowClassByColor[glowColor], className)} {...props} />;
+  return (
+    <div
+      className={cn(
+        "glass-card rounded-[20px] border border-white/10 bg-[rgba(17,24,36,0.62)] backdrop-blur-md",
+        glowClassByColor[glowColor],
+        className,
+      )}
+      {...props}
+    />
+  );
 }
 
 export function GradientBorderCard({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cn(
-        "rounded-[22px] bg-gradient-to-br from-[rgba(123,97,255,0.45)] via-[rgba(47,128,237,0.35)] to-[rgba(0,229,255,0.28)] p-[1px]",
+        "rounded-[22px] bg-linear-to-br from-[rgba(123,97,255,0.45)] via-[rgba(47,128,237,0.35)] to-[rgba(0,229,255,0.28)] p-px",
         className,
       )}
     >
-      <div className="glass-card rounded-[21px]" {...props} />
+      <div className="glass-card rounded-[21px] border border-white/10 bg-[rgba(17,24,36,0.62)] backdrop-blur-md" {...props} />
     </div>
   );
 }

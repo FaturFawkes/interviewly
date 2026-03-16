@@ -17,25 +17,8 @@ export type ResumeRecord = {
   id: string;
   user_id: string;
   content: string;
-  minio_path?: string;
   created_at: string;
 };
-
-export type ResumeAIAnalysis = {
-  summary: string;
-  response: string;
-  highlights: string[];
-  recommendations: string[];
-};
-
-export type ResumeAnalysisResponse = {
-  resume: ResumeRecord;
-  analysis: ResumeAIAnalysis;
-};
-
-export type InterviewLanguage = "id" | "en";
-export type InterviewMode = "text" | "voice";
-export type InterviewDifficulty = "easy" | "medium" | "hard";
 
 export type StoredQuestion = {
   id: string;
@@ -53,27 +36,33 @@ export type GenerateQuestionsResponse = {
   job_parse_id?: string;
 };
 
+export type InterviewMode = "text" | "voice";
+export type InterviewLanguage = "en" | "id";
+export type InterviewDifficulty = "easy" | "medium" | "hard";
+
+export type SessionStartMetadata = {
+  interview_mode?: InterviewMode;
+  interview_language?: InterviewLanguage;
+  interview_difficulty?: InterviewDifficulty;
+  target_role?: string;
+  target_company?: string;
+};
+
 export type PracticeSession = {
   id: string;
   user_id: string;
   resume_id: string;
   job_parse_id: string;
+  question_ids: string[];
   interview_mode: InterviewMode;
   interview_language: InterviewLanguage;
+  interview_difficulty: InterviewDifficulty;
   target_role?: string;
   target_company?: string;
-  question_ids: string[];
   status: "active" | "completed" | "abandoned";
   score: number;
   created_at: string;
   completed_at?: string;
-};
-
-export type SessionStartMetadata = {
-  interview_mode?: InterviewMode;
-  interview_language?: InterviewLanguage;
-  target_role?: string;
-  target_company?: string;
 };
 
 export type SessionHistoryResponse = {
@@ -83,6 +72,18 @@ export type SessionHistoryResponse = {
 export type VoiceAgentSession = {
   signed_url: string;
   conversation_id?: string;
+};
+
+export type AgentFeedbackPayload = {
+  session_id: string;
+  question_id: string;
+  question: string;
+  answer: string;
+  score: number;
+  strengths: string[];
+  weaknesses: string[];
+  improvements: string[];
+  star_feedback: string;
 };
 
 export type SessionAnswer = {
@@ -117,22 +118,11 @@ export type ProgressMetrics = {
   updated_at: string;
 };
 
-export type AnalyticsPoint = {
-  label: string;
-  score: number;
-};
-
 export type AnalyticsOverview = {
-  interview_readiness: number;
   average_score: number;
-  avg_score_trend: number;
-  total_sessions: number;
-  practice_hours: number;
-  practice_streak_days: number;
+  sessions_completed: number;
   weak_areas: string[];
-  recommendations: string[];
   recent_sessions: PracticeSession[];
-  score_history: AnalyticsPoint[];
 };
 
 export type APIError = {

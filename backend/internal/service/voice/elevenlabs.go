@@ -152,8 +152,8 @@ func (s *Service) TextToSpeech(text string) ([]byte, error) {
 		return nil, err
 	}
 
-	url := fmt.Sprintf("%s/text-to-speech/%s", s.baseURL, s.voiceID)
-	request, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	requestURL := fmt.Sprintf("%s/text-to-speech/%s", s.baseURL, s.voiceID)
+	request, err := http.NewRequest(http.MethodPost, requestURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

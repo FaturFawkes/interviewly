@@ -66,7 +66,7 @@ func Load() *Config {
 		SMTPFromEmail:                 getEnv("SMTP_FROM_EMAIL", "no-reply@interviewly.local"),
 		SMTPFromName:                  getEnv("SMTP_FROM_NAME", "Interviewly"),
 		OTPExpiryMinutes:              getEnvInt("OTP_EXPIRY_MINUTES", 10),
-		AIProvider:                    strings.ToLower(getEnv("AI_PROVIDER", "openai")),
+		AIProvider:                    strings.ToLower(getEnv("AI_PROVIDER", "local")),
 		AIModel:                       getEnv("AI_MODEL", "gpt-4o-mini"),
 		AIAPIBaseURL:                  getEnv("AI_API_BASE_URL", "https://api.openai.com/v1"),
 		AIAPIKey:                      getEnv("AI_API_KEY", ""),

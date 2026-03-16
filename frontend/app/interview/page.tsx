@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-export default function VoicePracticeRedirectPage() {
+export default function InterviewLegacyRedirectPage() {
   const router = useRouter();
 
   useEffect(() => {

@@ -8,10 +8,6 @@ test:
 test-e2e:
 	python3 backend/scripts/e2e_api_regression.py
 
-restart:
-	$(COMPOSE) down && $(COMPOSE) up -d
-	$(MAKE) migrate-up
-
 compose-up:
 	$(COMPOSE) up -d
 	$(MAKE) migrate-up
@@ -30,7 +26,7 @@ compose-build:
 
 compose-rebuild:
 	$(COMPOSE) down
-	$(COMPOSE) build
+	$(COMPOSE) build --no-cache
 	$(MAKE) compose-up
 
 compose-clean-images:

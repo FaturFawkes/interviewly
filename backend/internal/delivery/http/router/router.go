@@ -33,10 +33,7 @@ func Setup(
 	api.Use(authMiddleware)
 	api.GET("/me", meHandler.GetMe)
 	api.POST("/job/parse", jobHandler.ParseJobDescription)
-	api.GET("/resume", resumeHandler.GetLatestResume)
 	api.POST("/resume", resumeHandler.SaveResume)
-	api.POST("/resume/analyze", resumeHandler.AnalyzeResume)
-	api.GET("/resume/download", resumeHandler.DownloadLatestResume)
 	api.POST("/questions/generate", questionHandler.GenerateQuestions)
 	api.POST("/voice/tts", voiceHandler.TextToSpeech)
 	api.POST("/voice/stt", voiceHandler.SpeechToText)
@@ -46,6 +43,7 @@ func Setup(
 	api.POST("/session/complete", sessionHandler.CompleteSession)
 	api.GET("/session/history", sessionHandler.GetSessionHistory)
 	api.POST("/feedback/generate", feedbackHandler.GenerateFeedback)
+	api.POST("/feedback/agent", feedbackHandler.SubmitAgentFeedback)
 	api.GET("/progress", progressHandler.GetProgress)
 	api.GET("/analytics/overview", progressHandler.GetAnalyticsOverview)
 

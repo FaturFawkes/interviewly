@@ -10,10 +10,10 @@ type DashboardHeaderProps = {
 
 export function DashboardHeader({ title, subtitle, onOpenMenu }: DashboardHeaderProps) {
   return (
-    <header className="mb-7 flex items-center justify-between gap-4">
+    <header className="mb-6 flex items-center justify-between rounded-[20px] border border-white/[0.06] bg-white/[0.02] px-4 py-3 backdrop-blur-md sm:px-5">
       <div>
-        <h1 className="text-2xl text-white tracking-tight">{title}</h1>
-        {subtitle && <p className="mt-1 text-white/40">{subtitle}</p>}
+        <h1 className="text-xl font-medium tracking-tight text-white sm:text-2xl">{title}</h1>
+        {subtitle && <p className="mt-1 text-sm text-white/40">{subtitle}</p>}
       </div>
 
       <button

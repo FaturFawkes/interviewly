@@ -7,7 +7,6 @@ import { AppShell } from "@/components/layout/AppShell";
 import { ChartCard } from "@/components/charts/ChartCard";
 import { Card } from "@/components/ui/Card";
 import { ProgressBar } from "@/components/ui/ProgressBar";
-import { ScoreBadge } from "@/components/ui/ScoreBadge";
 import { Tag } from "@/components/ui/Tag";
 import { api } from "@/lib/api/endpoints";
 
@@ -21,7 +20,7 @@ const StrengthWeaknessChart = dynamic(
   { ssr: false },
 );
 
-type DashboardState = {
+type ProgressState = {
   averageScore: number;
   sessionsCompleted: number;
   weakAreas: string[];
@@ -46,8 +45,8 @@ function buildStrengthWeaknessData(weakAreas: string[], averageScore: number) {
   });
 }
 
-export default function DashboardPage() {
-  const [state, setState] = useState<DashboardState>({
+export default function ProgressPage() {
+  const [state, setState] = useState<ProgressState>({
     averageScore: 0,
     sessionsCompleted: 0,
     weakAreas: [],
@@ -59,6 +58,7 @@ export default function DashboardPage() {
     async function load() {
       try {
         const [progress, history] = await Promise.all([api.getProgress(), api.getSessionHistory()]);
+
         setState({
           averageScore: Math.round(progress.average_score),
           sessionsCompleted: progress.sessions_completed,
@@ -74,49 +74,45 @@ export default function DashboardPage() {
     void load();
   }, []);
 
-  const readinessScore = useMemo(
-    () => Math.min(100, Math.round(state.averageScore * 0.75 + state.sessionsCompleted * 2.6)),
+  const readiness = useMemo(
+    () => Math.min(100, Math.round(state.averageScore * 0.8 + state.sessionsCompleted * 2.2)),
     [state.averageScore, state.sessionsCompleted],
   );
 
-  const recommendations = state.weakAreas.length
-    ? state.weakAreas.map((area) => `Practice one STAR answer focused on ${area.toLowerCase()}.`)
+  const recommendedImprovements = state.weakAreas.length
+    ? state.weakAreas.map((area) => `Run 3 concise practice answers focused on ${area.toLowerCase()}.`)
     : ["No personalized recommendations yet. Complete a practice session first."];
 
   return (
-    <AppShell title="Dashboard" subtitle="Track interview readiness and keep improving each session.">
-      <div className="space-y-5">
-        <section className="grid gap-4 md:grid-cols-3">
-          <Card>
-            <p className="text-sm text-[var(--color-text-muted)]">Interview readiness</p>
-            <p className="mt-2 text-3xl font-bold text-white">{readinessScore}%</p>
+    <AppShell title="Progress Analytics" subtitle="Monitor long-term readiness and target high-impact improvements.">
+      <div className="space-y-4">
+        <section className="grid gap-4 lg:grid-cols-3">
+          <Card className="lg:col-span-2">
+            <p className="text-sm text-[var(--color-text-muted)]">Interview readiness score</p>
+            <p className="mt-2 text-4xl font-bold text-white">{readiness}%</p>
+            <p className="mt-2 text-sm text-white/80">Computed from consistency and answer quality trends.</p>
             <div className="mt-3">
-              <ProgressBar value={readinessScore} />
+              <ProgressBar value={readiness} />
             </div>
           </Card>
+
           <Card>
-            <p className="text-sm text-[var(--color-text-muted)]">Average score</p>
-            <div className="mt-2">
-              <ScoreBadge score={state.averageScore} className="text-base" />
+            <p className="text-sm text-[var(--color-text-muted)]">Improvement focus</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {state.weakAreas.length > 0 ? state.weakAreas.map((area) => <Tag key={area}>{area}</Tag>) : <Tag>Maintain momentum</Tag>}
             </div>
-            <p className="mt-3 text-sm text-white/80">Based on recent sessions.</p>
-          </Card>
-          <Card>
-            <p className="text-sm text-[var(--color-text-muted)]">Sessions completed</p>
-            <p className="mt-2 text-3xl font-bold text-white">{state.sessionsCompleted}</p>
-            <p className="mt-3 text-sm text-white/80">Consistency compounds your interview confidence.</p>
           </Card>
         </section>
 
         <section className="grid gap-4 xl:grid-cols-2">
-          <ChartCard title="Score History" subtitle="Session-to-session trend">
+          <ChartCard title="Score History" subtitle="Average quality trend over sessions">
             {state.history.length > 0 ? (
               <ScoreHistoryChart data={state.history} />
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-[var(--color-text-muted)]">No session data yet.</div>
             )}
           </ChartCard>
-          <ChartCard title="Strength vs Weakness" subtitle="Core communication dimensions">
+          <ChartCard title="Strength vs Weakness" subtitle="Communication capability profile">
             {state.strengthWeakness.length > 0 ? (
               <StrengthWeaknessChart data={state.strengthWeakness} />
             ) : (
@@ -125,37 +121,16 @@ export default function DashboardPage() {
           </ChartCard>
         </section>
 
-        <section className="grid gap-4 xl:grid-cols-2">
-          <Card>
-            <h3 className="text-base font-semibold text-white">Recent practice sessions</h3>
-            <div className="mt-4 space-y-3">
-              {state.history.length > 0 ? (
-                state.history.slice(0, 4).map((item, index) => (
-                  <div key={`${item.label}-${index}`} className="flex items-center justify-between rounded-[14px] border border-white/10 bg-white/5 px-3 py-2">
-                    <p className="text-sm text-white">Session {item.label}</p>
-                    <ScoreBadge score={item.score} label="Score" />
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-[var(--color-text-muted)]">No session history available.</p>
-              )}
-            </div>
-          </Card>
-
-          <Card>
-            <h3 className="text-base font-semibold text-white">Recommended actions</h3>
-            <div className="mt-4 space-y-3">
-              {recommendations.map((recommendation) => (
-                <div key={recommendation} className="rounded-[14px] border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-sm text-cyan-100">
-                  {recommendation}
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {state.weakAreas.length ? state.weakAreas.map((area) => <Tag key={area}>{area}</Tag>) : <Tag>No weak areas detected</Tag>}
-            </div>
-          </Card>
-        </section>
+        <Card>
+          <h3 className="text-base font-semibold text-white">Recommended improvement areas</h3>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {recommendedImprovements.map((item) => (
+              <div key={item} className="rounded-[14px] border border-cyan-300/30 bg-cyan-400/10 px-3 py-2 text-sm text-cyan-100">
+                {item}
+              </div>
+            ))}
+          </div>
+        </Card>
       </div>
     </AppShell>
   );

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 import { useInterviewFlow } from "@/hooks/useInterviewFlow";
 import { api } from "@/lib/api/endpoints";
 import { cn } from "@/lib/utils";
@@ -32,15 +33,24 @@ export default function VoiceCallPage() {
     completeSession,
     goToNextQuestion,
     sessionCompleted,
-  } = useInterviewFlow({ storageKey: "interview-flow-voice" });
+  } = useInterviewFlow();
 
   const interviewLanguageLabel = session?.interview_language === "id" ? "Bahasa Indonesia" : "English";
+  const interviewDifficultyLabel = session?.interview_difficulty === "easy"
+    ? "Easy"
+    : session?.interview_difficulty === "hard"
+      ? "Hard"
+      : "Medium";
   const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
   const conversationRef = useRef<Conversation | null>(null);
   const announcedQuestionIDRef = useRef<string>("");
   const pendingAnswerQueueRef = useRef<string[]>([]);
   const queueRunningRef = useRef(false);
+  const startingConversationRef = useRef(false);
+  const processedAgentEventIDsRef = useRef<Set<number>>(new Set());
   const processedUserEventIDsRef = useRef<Set<number>>(new Set());
+  const recentMessageDedupRef = useRef<Map<string, number>>(new Map());
+  const questionsRef = useRef(questions);
   const currentIndexRef = useRef(currentIndex);
   const questionCountRef = useRef(questions.length);
   const sessionCompletedRef = useRef(sessionCompleted);
@@ -55,10 +65,11 @@ export default function VoiceCallPage() {
   const [transcriptItems, setTranscriptItems] = useState<TranscriptItem[]>([]);
 
   useEffect(() => {
+    questionsRef.current = questions;
     currentIndexRef.current = currentIndex;
     questionCountRef.current = questions.length;
     sessionCompletedRef.current = sessionCompleted;
-  }, [currentIndex, questions.length, sessionCompleted]);
+  }, [currentIndex, questions, sessionCompleted]);
 
   useEffect(() => {
     if (!transcriptContainerRef.current) {
@@ -79,6 +90,21 @@ export default function VoiceCallPage() {
       return [...previous, entry].slice(-24);
     });
   }, []);
+
+  const buildAgentContextInstruction = useCallback(() => {
+    const languageInstruction = session?.interview_language === "id"
+      ? "Use Bahasa Indonesia only for all spoken responses."
+      : "Use English only for all spoken responses.";
+
+    return [
+      "You are the interviewer for a voice mock interview session.",
+      languageInstruction,
+      `Interview mode: ${session?.interview_mode ?? "voice"}.`,
+      `Difficulty level: ${session?.interview_difficulty ?? "medium"}.`,
+      "Keep responses natural and conversational.",
+      "Do not speak JSON, code blocks, or machine-readable payloads.",
+    ].join(" ");
+  }, [session?.interview_difficulty, session?.interview_language, session?.interview_mode]);
 
   const endAgentConversation = useCallback(async () => {
     const activeConversation = conversationRef.current;
@@ -149,9 +175,11 @@ export default function VoiceCallPage() {
   }, [completeSession, goToNextQuestion, isCallActive, submitAnswerText]);
 
   const startAgentConversation = useCallback(async () => {
-    if (conversationRef.current || !isCallActive) {
+    if (conversationRef.current || startingConversationRef.current || !isCallActive) {
       return;
     }
+
+    startingConversationRef.current = true;
 
     setVoiceError(null);
     setVoiceInfo("Connecting to ElevenLabs agent...");
@@ -165,8 +193,13 @@ export default function VoiceCallPage() {
         connectionType: "websocket",
         userId: session?.id,
         onConnect: ({ conversationId }) => {
-          setConversationID(conversationId);
+          setConversationID(conversationId ?? null);
           setVoiceInfo("Connected. Speak naturally with the interviewer.");
+          try {
+            conversationRef.current?.sendContextualUpdate(buildAgentContextInstruction());
+          } catch {
+            setVoiceError("Failed to send interview preferences to AI interviewer.");
+          }
         },
         onStatusChange: ({ status }) => {
           setAgentStatus(status);
@@ -189,7 +222,28 @@ export default function VoiceCallPage() {
             return;
           }
 
+          const now = Date.now();
+          const dedupKey = `${role}:${trimmedMessage.toLowerCase()}`;
+          const previousTimestamp = recentMessageDedupRef.current.get(dedupKey);
+          if (typeof previousTimestamp === "number" && now-previousTimestamp < 3000) {
+            return;
+          }
+          recentMessageDedupRef.current.set(dedupKey, now);
+          if (recentMessageDedupRef.current.size > 300) {
+            recentMessageDedupRef.current.clear();
+          }
+
           if (role === "agent") {
+            if (typeof event_id === "number") {
+              if (processedAgentEventIDsRef.current.has(event_id)) {
+                return;
+              }
+              processedAgentEventIDsRef.current.add(event_id);
+              if (processedAgentEventIDsRef.current.size > 500) {
+                processedAgentEventIDsRef.current.clear();
+              }
+            }
+
             appendTranscript("agent", trimmedMessage);
             return;
           }
@@ -226,8 +280,10 @@ export default function VoiceCallPage() {
       setAgentStatus("disconnected");
       setVoiceError(agentError instanceof Error ? agentError.message : "Unable to connect to ElevenLabs agent.");
       setVoiceInfo("AI interviewer is unavailable. End call and try again from voice setup.");
+    } finally {
+      startingConversationRef.current = false;
     }
-  }, [appendTranscript, isCallActive, processPendingAnswers, session?.id]);
+  }, [appendTranscript, buildAgentContextInstruction, isCallActive, processPendingAnswers, session?.id]);
 
   useEffect(() => {
     if (!isCallActive || !currentQuestion || connectionMode !== "initializing") {
@@ -258,23 +314,23 @@ export default function VoiceCallPage() {
 
     try {
       conversationRef.current.sendContextualUpdate(
-        `Interview context update: Ask this exact question in ${interviewLanguageLabel}: "${currentQuestion.question}". Wait for candidate answer before continuing.`,
+        `${buildAgentContextInstruction()} Interview context update: Ask this exact question: "${currentQuestion.question}". Wait for candidate answer before continuing.`,
       );
       setVoiceInfo("AI interviewer is asking the current question.");
     } catch {
       setVoiceError("Failed to send question context to AI interviewer.");
     }
-  }, [agentStatus, connectionMode, currentQuestion?.id, currentQuestion?.question, interviewLanguageLabel, isCallActive, sessionCompleted]);
+  }, [agentStatus, buildAgentContextInstruction, connectionMode, currentQuestion?.id, currentQuestion?.question, isCallActive, sessionCompleted]);
 
   function endCall() {
     setIsCallActive(false);
     setVoiceInfo("Call ended.");
     void endAgentConversation();
-    router.push("/practice/voice");
+    router.push("/practice");
   }
 
   function openVoiceSetup() {
-    router.push("/practice/voice");
+    router.push("/practice");
   }
 
   function formatTimer(secondsTotal: number): string {
@@ -288,10 +344,10 @@ export default function VoiceCallPage() {
 
   const statusLabel = connectionMode === "agent"
     ? agentMode === "speaking"
-      ? "Agent speaking"
-      : "Listening"
+      ? "AI Interviewer speaking"
+      : "Listening for your answer"
     : connectionMode === "initializing"
-      ? "Connecting"
+      ? "Connecting AI Interviewer"
       : "Disconnected";
 
   if (!currentQuestion) {
@@ -302,12 +358,12 @@ export default function VoiceCallPage() {
         <div className="ambient-orb orb-cyan right-[-100px] bottom-[-20px] h-80 w-80" />
 
         <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-5xl flex-col items-center justify-center px-6 text-center">
-          <div className="mb-5 inline-flex h-16 w-16 items-center justify-center rounded-3xl border border-white/15 bg-white/5">
-            <Sparkles className="h-8 w-8 text-cyan-200" />
+          <div className="mb-5 inline-flex h-16 w-16 items-center justify-center rounded-3xl border border-white/15 bg-gradient-to-br from-purple-500/30 to-cyan-500/20">
+            <Sparkles className="h-8 w-8 text-cyan-100" />
           </div>
-          <h1 className="text-2xl font-semibold">No active voice interview</h1>
+          <h1 className="text-2xl font-semibold">No active interview session</h1>
           <p className="mt-2 max-w-xl text-sm text-[var(--color-text-muted)]">
-            Prepare interview questions first from the voice setup page.
+            Start from Practice setup and choose Voice interview mode first.
           </p>
           <Button onClick={openVoiceSetup} className="mt-6">
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -325,105 +381,129 @@ export default function VoiceCallPage() {
       <div className="ambient-orb orb-cyan right-[-90px] top-[28%] h-80 w-80" />
       <div className="absolute inset-x-0 bottom-[-140px] mx-auto h-80 w-[70vw] rounded-full bg-gradient-to-r from-purple-500/20 via-cyan-400/20 to-blue-500/20 blur-3xl" />
 
-      <div className="relative z-10 flex min-h-screen flex-col px-4 py-4 md:px-8 md:py-6">
-        <header className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 backdrop-blur-md">
-          <div className="flex items-center gap-2">
-            <p className="text-sm text-[var(--color-text-muted)]">
-              {connectionMode === "agent" ? "ElevenLabs realtime interviewer" : "Waiting for AI interviewer"}
-            </p>
+      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-4 md:px-8 md:py-6">
+        <header className="space-y-3 rounded-[20px] border border-white/10 bg-[rgba(17,24,36,0.72)] px-4 py-3 backdrop-blur-xl md:px-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg text-white tracking-tight">Interview Session</h2>
+              <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+              {connectionMode === "agent" ? "Voice mode · AI Interviewer" : "Preparing AI Interviewer"}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-cyan-200">
+                Question {currentIndex + 1}/{questions.length}
+              </span>
+              <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-white/85">
+                {interviewLanguageLabel}
+              </span>
+              <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-white/85">
+                {interviewDifficultyLabel}
+              </span>
+              <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-white/85">
+                {formatTimer(timerSeconds)}
+              </span>
+              <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-white/85">{statusLabel}</span>
+              {connectionMode === "agent" && conversationID && (
+                <span className="rounded-full border border-emerald-300/30 bg-emerald-400/10 px-3 py-1 text-emerald-200">
+                  #{conversationID.slice(0, 8)}
+                </span>
+              )}
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs">
-            <span className="rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-cyan-200">
-              Question {currentIndex + 1}/{questions.length}
-            </span>
-            <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-white/85">
-              {interviewLanguageLabel}
-            </span>
-            <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-white/85">
-              {formatTimer(timerSeconds)}
-            </span>
-            <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-white/85">{statusLabel}</span>
-            {connectionMode === "agent" && conversationID && (
-              <span className="rounded-full border border-emerald-300/30 bg-emerald-400/10 px-3 py-1 text-emerald-200">
-                #{conversationID.slice(0, 8)}
-              </span>
-            )}
+          <div className="flex items-center gap-1.5">
+            {questions.map((item, index) => (
+              <div
+                key={item.id}
+                className={cn(
+                  "h-1.5 rounded-full transition-all",
+                  index === currentIndex
+                    ? "w-8 bg-gradient-to-r from-purple-500 to-cyan-400"
+                    : index < currentIndex
+                      ? "w-6 bg-purple-500/30"
+                      : "w-6 bg-white/[0.08]",
+                )}
+              />
+            ))}
           </div>
         </header>
 
-        <main className="flex flex-1 flex-col items-center justify-center gap-6 py-6">
+        <main className="flex flex-1 flex-col items-center justify-center gap-5 py-6">
           <VoiceOrb isSpeaking={speakingState} isListening={listeningState} isCallActive={isCallActive} />
 
-          <div className="w-full max-w-4xl space-y-4 rounded-[20px] border border-white/10 bg-[rgba(17,24,36,0.72)] p-4 backdrop-blur-md md:p-6">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">AI interviewer question</p>
-              <p className="mt-2 text-base leading-relaxed text-white/95 md:text-lg">{currentQuestion.question}</p>
-            </div>
+          <div className="w-full max-w-5xl rounded-[20px] bg-gradient-to-r from-purple-500/35 via-cyan-500/30 to-purple-500/35 p-[1px]">
+            <Card className="space-y-5 p-5 md:p-6">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">AI Interviewer</p>
+                <p className="mt-2 text-base leading-relaxed text-white/95 md:text-lg">{currentQuestion.question}</p>
+              </div>
 
             {(error || voiceError || voiceInfo) && (
-              <div className="space-y-1">
-                {error && <p className="text-sm text-red-300">{error}</p>}
-                {voiceError && <p className="text-sm text-red-300">{voiceError}</p>}
-                {voiceInfo && <p className="text-sm text-cyan-200">{voiceInfo}</p>}
+              <div className="flex flex-wrap gap-2">
+                {error && <p className="inline-flex rounded-full border border-red-400/25 bg-red-500/10 px-3 py-1 text-xs text-red-300">{error}</p>}
+                {voiceError && <p className="inline-flex rounded-full border border-red-400/25 bg-red-500/10 px-3 py-1 text-xs text-red-300">{voiceError}</p>}
+                {voiceInfo && <p className="inline-flex rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-200">{voiceInfo}</p>}
               </div>
             )}
 
-            {connectionMode === "agent" ? (
-              <div>
-                <p className="mb-2 text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Live transcript</p>
-                <div
-                  ref={transcriptContainerRef}
-                  className="max-h-56 space-y-2 overflow-y-auto rounded-2xl border border-white/10 bg-white/[0.03] p-3"
-                >
-                  {transcriptItems.length === 0 && (
-                    <p className="text-sm text-white/55">
-                      Transcript will appear here once conversation starts.
-                    </p>
-                  )}
-                  {transcriptItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className={cn(
-                        "rounded-xl px-3 py-2 text-sm",
-                        item.role === "agent"
-                          ? "border border-cyan-300/20 bg-cyan-400/10 text-cyan-100"
-                          : "border border-white/15 bg-white/[0.04] text-white/90",
-                      )}
-                    >
-                      <p className="mb-1 text-[11px] uppercase tracking-wide opacity-70">
-                        {item.role === "agent" ? "Interviewer" : "You"}
+              {connectionMode === "agent" ? (
+                <div>
+                  <p className="mb-2 text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Interview Transcript</p>
+                  <div
+                    ref={transcriptContainerRef}
+                    className="max-h-56 space-y-2 overflow-y-auto rounded-2xl border border-white/10 bg-white/[0.03] p-3"
+                  >
+                    {transcriptItems.length === 0 && (
+                      <p className="text-sm text-white/55">
+                        Conversation transcript will appear here.
                       </p>
-                      <p>{item.message}</p>
-                    </div>
-                  ))}
+                    )}
+                    {transcriptItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className={cn(
+                          "rounded-xl px-3 py-2 text-sm leading-relaxed",
+                          item.role === "agent"
+                            ? "border border-cyan-300/20 bg-cyan-400/10 text-cyan-100"
+                            : "border border-white/15 bg-white/[0.04] text-white/90",
+                        )}
+                      >
+                        <p className="mb-1 text-[11px] uppercase tracking-wide opacity-70">
+                          {item.role === "agent" ? "Interviewer" : "You"}
+                        </p>
+                        <p>{item.message}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                <p className="text-sm text-white/70">
-                  Voice call is fully automatic. If connection drops, end the call and restart from voice setup.
-                </p>
-              </div>
-            )}
+              ) : (
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                  <p className="text-sm text-white/70">
+                    Voice interview runs automatically. If connection drops, end the session and restart from setup.
+                  </p>
+                </div>
+              )}
 
-            <p className="text-xs text-white/60">
-              Answer processing is automatic. Keep speaking naturally and the app evaluates each response.
-            </p>
+              <p className="text-xs text-white/60">
+                Keep speaking naturally. Each answer is evaluated automatically.
+              </p>
 
-            <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" onClick={endCall} className="border-red-400/50 text-red-200 hover:border-red-300/70">
-                <PhoneOff className="mr-2 h-4 w-4" />
-                End call
-              </Button>
-            </div>
-
-            {feedback && (
-              <div className="rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-3">
-                <p className="text-xs uppercase tracking-wide text-cyan-200/80">Latest feedback</p>
-                <p className="mt-1 text-sm text-cyan-100">Score {feedback.score}/100 · {feedback.star_feedback}</p>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button variant="secondary" onClick={endCall} className="border-red-400/50 text-red-200 hover:border-red-300/70">
+                  <PhoneOff className="mr-2 h-4 w-4" />
+                  End Session
+                </Button>
               </div>
-            )}
+
+              {feedback && (
+                <div className="rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-3">
+                  <p className="text-xs uppercase tracking-wide text-cyan-200/80">Latest Feedback</p>
+                  <p className="mt-1 text-sm text-cyan-100">Score {feedback.score}/100 · {feedback.star_feedback}</p>
+                </div>
+              )}
+            </Card>
           </div>
         </main>
       </div>
