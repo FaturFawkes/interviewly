@@ -79,6 +79,40 @@ export type SessionHistoryResponse = {
 export type VoiceAgentSession = {
   signed_url: string;
   conversation_id?: string;
+  total_voice_minutes?: number;
+  used_voice_minutes?: number;
+  remaining_voice_minutes?: number;
+  allowed_call_seconds?: number;
+  warning_threshold_reached?: boolean;
+  voice_quota_message?: string;
+};
+
+export type VoiceUsageCommitResponse = {
+  total_voice_minutes: number;
+  used_voice_minutes: number;
+  remaining_voice_minutes: number;
+  period_start: string;
+  period_end: string;
+};
+
+export type SubscriptionStatus = {
+  plan_id: string;
+  is_free_tier: boolean;
+  total_voice_minutes: number;
+  used_voice_minutes: number;
+  remaining_voice_minutes: number;
+  total_sessions: number;
+  used_sessions: number;
+  remaining_sessions: number;
+  trial_available: boolean;
+  trial_active: boolean;
+  trial_duration_hours: number;
+  trial_bonus_voice_minutes: number;
+  trial_ends_at?: string;
+  trigger_required_sessions: number;
+  trigger_progress_sessions: number;
+  upsell_messages: string[];
+  anti_abuse_rules: string[];
 };
 
 export type PaymentPlanID = "starter" | "pro" | "elite";

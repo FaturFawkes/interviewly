@@ -93,7 +93,7 @@ func Load() *Config {
 		StripeSecretKey:               getEnv("STRIPE_SECRET_KEY", ""),
 		StripeSuccessURL:              getEnv("STRIPE_SUCCESS_URL", "http://localhost:3000?payment=success"),
 		StripeCancelURL:               getEnv("STRIPE_CANCEL_URL", "http://localhost:3000?payment=cancel"),
-		StripeCurrency:                strings.ToLower(getEnv("STRIPE_CURRENCY", "usd")),
+		StripeCurrency:                strings.ToLower(getEnv("STRIPE_CURRENCY", "idr")),
 		StripePriceStarterMonthly:     getEnv("STRIPE_PRICE_STARTER_MONTHLY", ""),
 		StripePriceProMonthly:         getEnv("STRIPE_PRICE_PRO_MONTHLY", ""),
 		StripePriceEliteMonthly:       getEnv("STRIPE_PRICE_ELITE_MONTHLY", ""),

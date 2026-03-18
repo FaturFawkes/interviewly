@@ -103,6 +103,8 @@ export default function VoiceCallPage() {
   const userTurnFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionFinalizingRef = useRef(false);
   const timeLimitHandledRef = useRef(false);
+  const warningThresholdShownRef = useRef(false);
+  const usageCommittedRef = useRef(false);
   const isCallActiveRef = useRef(true);
   const dashboardRedirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const questionsRef = useRef(questions);
@@ -123,10 +125,11 @@ export default function VoiceCallPage() {
   const [evaluatedTurns, setEvaluatedTurns] = useState<number>(currentIndex);
   const [showCompletionPopup, setShowCompletionPopup] = useState(false);
   const [completionPopupMessage, setCompletionPopupMessage] = useState<string>(DEFAULT_COMPLETION_POPUP_MESSAGE);
+  const [voiceLimitSeconds, setVoiceLimitSeconds] = useState<number>(VOICE_CALL_MAX_SECONDS);
   const showTranscriptPanel = !HIDE_TRANSCRIPT_IN_PRODUCTION;
   const selectedInterviewLanguage = resolveSessionLanguage(session?.interview_language);
-  const remainingCallSeconds = Math.max(VOICE_CALL_MAX_SECONDS - timerSeconds, 0);
-  const callProgressPercent = Math.min(100, Math.round((timerSeconds / VOICE_CALL_MAX_SECONDS) * 100));
+  const remainingCallSeconds = Math.max(voiceLimitSeconds - timerSeconds, 0);
+  const callProgressPercent = Math.min(100, Math.round((timerSeconds / Math.max(voiceLimitSeconds, 1)) * 100));
 
   useEffect(() => {
     questionsRef.current = questions;
@@ -339,6 +342,20 @@ export default function VoiceCallPage() {
     }
   }, []);
 
+  const commitVoiceUsageIfNeeded = useCallback(async () => {
+    if (usageCommittedRef.current || !session?.id || timerSeconds <= 0 || connectionMode !== "agent") {
+      return;
+    }
+
+    usageCommittedRef.current = true;
+
+    try {
+      await api.commitVoiceUsage(session.id, timerSeconds);
+    } catch {
+      usageCommittedRef.current = false;
+    }
+  }, [connectionMode, session?.id, timerSeconds]);
+
   const finalizeInterviewSession = useCallback(async (options?: {
     redirectToPractice?: boolean;
     redirectToDashboardWithPopup?: boolean;
@@ -356,6 +373,7 @@ export default function VoiceCallPage() {
       setVoiceInfo(options?.finalInfoMessage ?? pickLocaleText(locale, "Menyelesaikan interview dan menyimpan hasil...", "Finalizing interview and saving results..."));
       flushActiveTurnForScoring();
       await waitForPendingScoring();
+      await commitVoiceUsageIfNeeded();
 
       if (!sessionCompletedRef.current) {
         const completed = await completeSession();
@@ -387,7 +405,7 @@ export default function VoiceCallPage() {
     } finally {
       sessionFinalizingRef.current = false;
     }
-  }, [completeSession, endAgentConversation, flushActiveTurnForScoring, openCompletionPopupAndRedirect, resetInterviewFlow, router, waitForPendingScoring]);
+  }, [commitVoiceUsageIfNeeded, completeSession, endAgentConversation, flushActiveTurnForScoring, locale, openCompletionPopupAndRedirect, resetInterviewFlow, router, waitForPendingScoring]);
 
   const startAgentConversation = useCallback(async () => {
     if (conversationRef.current || startingConversationRef.current || !isCallActive) {
@@ -400,6 +418,9 @@ export default function VoiceCallPage() {
     setVoiceInfo(pickLocaleText(locale, "Menghubungkan ke agen ElevenLabs...", "Connecting to ElevenLabs agent..."));
     setAgentStatus("connecting");
     timeLimitHandledRef.current = false;
+    warningThresholdShownRef.current = false;
+    usageCommittedRef.current = false;
+    setVoiceLimitSeconds(VOICE_CALL_MAX_SECONDS);
 
     try {
       const agentSession = await api.createVoiceAgentSession();
@@ -528,15 +549,29 @@ export default function VoiceCallPage() {
       if (agentSession.conversation_id) {
         setConversationID(agentSession.conversation_id);
       }
+
+      if (typeof agentSession.allowed_call_seconds === "number" && Number.isFinite(agentSession.allowed_call_seconds)) {
+        const boundedSeconds = Math.max(1, Math.min(VOICE_CALL_MAX_SECONDS, Math.floor(agentSession.allowed_call_seconds)));
+        setVoiceLimitSeconds(boundedSeconds);
+      }
+
+      if (agentSession.warning_threshold_reached) {
+        setVoiceInfo(agentSession.voice_quota_message || pickLocaleText(locale, "Sisa menit voice Anda hampir habis.", "Your remaining voice minutes are almost exhausted."));
+      }
     } catch (agentError) {
       setConnectionMode("fallback");
       setAgentStatus("disconnected");
-      setVoiceError(agentError instanceof Error ? agentError.message : "Unable to connect to ElevenLabs agent.");
+      const message = agentError instanceof Error ? agentError.message : "Unable to connect to ElevenLabs agent.";
+      setVoiceError(message);
       setVoiceInfo(pickLocaleText(locale, "Interviewer AI tidak tersedia. Akhiri panggilan dan coba lagi dari pengaturan voice.", "AI interviewer is unavailable. End call and try again from voice setup."));
+
+      if (message.toLowerCase().includes("voice quota exceeded")) {
+        router.push("/practice");
+      }
     } finally {
       startingConversationRef.current = false;
     }
-  }, [appendTranscript, buildAgentContextInstruction, finalizeInterviewSession, flushActiveTurnForScoring, isCallActive, isMuted, locale, scheduleTurnFlush, selectedInterviewLanguage, session?.id, showTranscriptPanel]);
+  }, [appendTranscript, buildAgentContextInstruction, finalizeInterviewSession, flushActiveTurnForScoring, isCallActive, isMuted, locale, router, scheduleTurnFlush, selectedInterviewLanguage, session?.id, showTranscriptPanel]);
 
   useEffect(() => {
     if (!isCallActive || !currentQuestion || connectionMode !== "initializing") {
@@ -559,7 +594,7 @@ export default function VoiceCallPage() {
       return;
     }
 
-    if (timerSeconds < VOICE_CALL_MAX_SECONDS || timeLimitHandledRef.current) {
+    if (timerSeconds < voiceLimitSeconds || timeLimitHandledRef.current) {
       return;
     }
 
@@ -570,7 +605,21 @@ export default function VoiceCallPage() {
       redirectToDashboardWithPopup: true,
       completionPopupMessage: DEFAULT_COMPLETION_POPUP_MESSAGE,
     });
-  }, [connectionMode, finalizeInterviewSession, isCallActive, sessionCompleted, timerSeconds]);
+  }, [connectionMode, finalizeInterviewSession, isCallActive, sessionCompleted, timerSeconds, voiceLimitSeconds]);
+
+  useEffect(() => {
+    if (!isCallActive || connectionMode !== "agent" || warningThresholdShownRef.current || voiceLimitSeconds <= 0) {
+      return;
+    }
+
+    const warningSeconds = Math.max(1, Math.floor(voiceLimitSeconds * 0.1));
+    if (remainingCallSeconds > warningSeconds) {
+      return;
+    }
+
+    warningThresholdShownRef.current = true;
+    setVoiceInfo(pickLocaleText(locale, "Peringatan: sisa menit voice kurang dari 10%.", "Warning: remaining voice minutes are below 10%."));
+  }, [connectionMode, isCallActive, locale, remainingCallSeconds, voiceLimitSeconds]);
 
   function endCall() {
     void finalizeInterviewSession({
@@ -670,7 +719,7 @@ export default function VoiceCallPage() {
                 {formatTimer(timerSeconds)}
               </span>
               <span className="rounded-full border border-amber-300/35 bg-amber-400/10 px-3 py-1 text-amber-100">
-                {pickLocaleText(locale, "Sisa", "Remaining")} {formatTimer(remainingCallSeconds)} / {formatTimer(VOICE_CALL_MAX_SECONDS)}
+                {pickLocaleText(locale, "Sisa", "Remaining")} {formatTimer(remainingCallSeconds)} / {formatTimer(voiceLimitSeconds)}
               </span>
               <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-white/85">{statusLabel}</span>
               {connectionMode === "agent" && conversationID && (

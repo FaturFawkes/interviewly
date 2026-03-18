@@ -23,7 +23,7 @@ const navItems = [
   { href: "/dashboard", labelID: "Dasbor", labelEN: "Dashboard", icon: LayoutDashboard },
   { href: "/upload", labelID: "Unggah Resume (CV)", labelEN: "Upload Resume (CV)", icon: Upload },
   { href: "/practice", labelID: "Latihan", labelEN: "Practice", icon: MessageSquare },
-  { href: "/analytics", labelID: "Analitik", labelEN: "Analytics", icon: BarChart3 },
+  { href: "/analytics", labelID: "Analisis Interview", labelEN: "Interview Analytics", icon: BarChart3 },
 ];
 
 type SidebarProps = {

@@ -16,6 +16,7 @@ func Setup(
 	voiceHandler *handler.VoiceHandler,
 	paymentHandler *handler.PaymentHandler,
 	sessionHandler *handler.SessionHandler,
+	subscriptionHandler *handler.SubscriptionHandler,
 	feedbackHandler *handler.FeedbackHandler,
 	progressHandler *handler.ProgressHandler,
 	authMiddleware gin.HandlerFunc,
@@ -43,10 +44,12 @@ func Setup(
 	api.POST("/voice/tts", voiceHandler.TextToSpeech)
 	api.POST("/voice/stt", voiceHandler.SpeechToText)
 	api.POST("/voice/agent/session", voiceHandler.CreateAgentSession)
+	api.POST("/voice/usage/commit", voiceHandler.CommitVoiceUsage)
 	api.POST("/session/start", sessionHandler.StartSession)
 	api.POST("/session/answer", sessionHandler.SubmitAnswer)
 	api.POST("/session/complete", sessionHandler.CompleteSession)
 	api.GET("/session/history", sessionHandler.GetSessionHistory)
+	api.GET("/subscription/status", subscriptionHandler.GetStatus)
 	api.POST("/feedback/generate", feedbackHandler.GenerateFeedback)
 	api.POST("/feedback/agent", feedbackHandler.SubmitAgentFeedback)
 	api.GET("/progress", progressHandler.GetProgress)

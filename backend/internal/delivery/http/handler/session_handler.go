@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/interview_app/backend/internal/delivery/http/middleware"
 	"github.com/interview_app/backend/internal/domain"
+	"github.com/interview_app/backend/internal/service/subscription"
 )
 
 type startSessionRequest struct {
@@ -31,11 +32,12 @@ type completeSessionRequest struct {
 
 // SessionHandler handles interview session APIs.
 type SessionHandler struct {
-	interviewUC domain.InterviewUseCase
+	interviewUC         domain.InterviewUseCase
+	subscriptionService *subscription.Service
 }
 
-func NewSessionHandler(interviewUC domain.InterviewUseCase) *SessionHandler {
-	return &SessionHandler{interviewUC: interviewUC}
+func NewSessionHandler(interviewUC domain.InterviewUseCase, subscriptionService *subscription.Service) *SessionHandler {
+	return &SessionHandler{interviewUC: interviewUC, subscriptionService: subscriptionService}
 }
 
 // StartSession handles POST /api/session/start.
@@ -58,6 +60,13 @@ func (h *SessionHandler) StartSession(c *gin.Context) {
 		return
 	}
 
+	if h.subscriptionService != nil {
+		if _, err := h.subscriptionService.CanStartSession(userID); err != nil {
+			c.JSON(http.StatusPaymentRequired, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
 	session, err := h.interviewUC.CreatePracticeSession(userID, req.ResumeID, req.JobParseID, req.QuestionIDs, domain.SessionMetadata{
 		InterviewMode:       req.InterviewMode,
 		InterviewLanguage:   domain.NormalizeInterviewLanguage(req.InterviewLanguage),
@@ -68,6 +77,13 @@ func (h *SessionHandler) StartSession(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	if h.subscriptionService != nil {
+		if _, err := h.subscriptionService.ConsumeSession(userID, session.ID); err != nil {
+			c.JSON(http.StatusPaymentRequired, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, session)

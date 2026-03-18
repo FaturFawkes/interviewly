@@ -17,7 +17,9 @@ import type {
   AnalyticsOverview,
   PaymentCheckoutSession,
   PaymentPlanID,
+  SubscriptionStatus,
   VoiceAgentSession,
+  VoiceUsageCommitResponse,
 } from "@/lib/api/types";
 
 export const api = {
@@ -102,6 +104,15 @@ export const api = {
       body: { include_conversation_id: includeConversationID },
     }),
 
+  commitVoiceUsage: (sessionID: string, elapsedSeconds: number): Promise<VoiceUsageCommitResponse> =>
+    apiRequest("/api/voice/usage/commit", {
+      method: "POST",
+      body: {
+        session_id: sessionID,
+        elapsed_seconds: elapsedSeconds,
+      },
+    }),
+
   submitAgentFeedback: (payload: AgentFeedbackPayload): Promise<FeedbackRecord> =>
     apiRequest("/api/feedback/agent", {
       method: "POST",
@@ -113,6 +124,8 @@ export const api = {
   getProgress: (): Promise<ProgressMetrics> => apiRequest("/api/progress"),
 
   getSessionHistory: (): Promise<SessionHistoryResponse> => apiRequest("/api/session/history"),
+
+  getSubscriptionStatus: (): Promise<SubscriptionStatus> => apiRequest("/api/subscription/status"),
 
   createCheckoutSession: (planID: PaymentPlanID): Promise<PaymentCheckoutSession> =>
     apiRequest("/payments/checkout", {

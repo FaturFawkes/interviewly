@@ -30,14 +30,16 @@ const pricingPlans: PricingPlan[] = [
     titleEN: "Starter",
     subtitleID: "Untuk latihan mandiri yang fokus",
     subtitleEN: "For focused solo prep",
-    priceLabel: "$19",
+    priceLabel: "Rp59.000",
     featuresID: [
-      "30 sesi interview/bulan",
+      "30 sesi interview (text + voice)",
+      "Maksimal 30 menit voice/bulan",
       "Skoring AI + feedback STAR",
       "Dasbor analitik progres",
     ],
     featuresEN: [
-      "30 interview sessions/month",
+      "30 interview sessions (text + voice)",
+      "Up to 30 voice minutes/month",
       "AI scoring + STAR feedback",
       "Progress analytics dashboard",
     ],
@@ -48,17 +50,21 @@ const pricingPlans: PricingPlan[] = [
     titleEN: "Pro Career Boost",
     subtitleID: "Untuk pencari kerja yang serius",
     subtitleEN: "For high-intent job seekers",
-    priceLabel: "$39",
+    priceLabel: "Rp129.000",
     badgeID: "Paling populer",
     badgeEN: "Most popular",
     featuresID: [
-      "Sesi tanpa batas",
-      "Analisis kecocokan role mendalam",
-      "Kecepatan respons AI prioritas",
+      "Sesi interview text tanpa batas",
+      "Maksimal 120 menit voice/bulan",
+      "Simulasi interview berbasis role",
+      "Deep feedback & scoring",
+      "Respons AI prioritas",
     ],
     featuresEN: [
-      "Unlimited sessions",
-      "Deep role-fit analysis",
+      "Unlimited text interview sessions",
+      "Up to 120 voice minutes/month",
+      "Role-based interview simulation",
+      "Deep feedback & scoring",
       "Priority AI response speed",
     ],
   },
@@ -68,15 +74,19 @@ const pricingPlans: PricingPlan[] = [
     titleEN: "Elite",
     subtitleID: "Untuk akselerasi penguasaan interview",
     subtitleEN: "For accelerated interview mastery",
-    priceLabel: "$79",
+    priceLabel: "Rp279.000",
     featuresID: [
-      "Semua fitur Pro",
-      "Insight strategi interview lanjutan",
+      "Sesi interview text tanpa batas",
+      "Maksimal 300 menit voice/bulan",
+      "Insight lanjutan & tracking peningkatan",
+      "Export report (PDF)",
       "Dukungan prioritas",
     ],
     featuresEN: [
-      "Everything in Pro",
-      "Advanced interview strategy insights",
+      "Unlimited text interview sessions",
+      "Up to 300 voice minutes/month",
+      "Advanced insights & improvement tracking",
+      "Export report (PDF)",
       "Priority support",
     ],
   },
@@ -107,8 +117,32 @@ export function PricingPlans() {
   return (
     <section className="space-y-4">
       <div className="text-center">
-        <h3 className="text-2xl font-semibold text-white">{pickLocaleText(locale, "Paket bulanan sederhana", "Simple monthly pricing")}</h3>
-        <p className="mt-2 text-sm text-muted">{pickLocaleText(locale, "Pilih paket lalu lanjut ke checkout aman.", "Choose a plan and continue to secure checkout.")}</p>
+        <h3 className="text-2xl font-semibold text-white">{pickLocaleText(locale, "Paket bulanan + trial terkontrol", "Monthly pricing + controlled trial")}</h3>
+        <p className="mt-2 text-sm text-muted">{pickLocaleText(locale, "Mulai dari free tier, lalu unlock soft trial berbasis engagement.", "Start with free tier, then unlock engagement-based soft trial.")}</p>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="rounded-3xl p-6">
+          <p className="inline-flex rounded-full border border-emerald-300/30 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-200">{pickLocaleText(locale, "Free Tier", "Free Tier")}</p>
+          <h3 className="mt-3 text-xl font-semibold text-white">{pickLocaleText(locale, "Rp0 (selamanya)", "Rp0 (forever)")}</h3>
+          <ul className="mt-4 space-y-2 text-sm text-white/90">
+            <li>• {pickLocaleText(locale, "3–5 sesi interview text per minggu", "3–5 text interview sessions per week")}</li>
+            <li>• {pickLocaleText(locale, "10 menit voice (kuota terkontrol)", "10 voice minutes (controlled quota)")}</li>
+            <li>• {pickLocaleText(locale, "1 Job Description (JD)", "1 Job Description (JD)")}</li>
+            <li>• {pickLocaleText(locale, "Feedback basic", "Basic feedback")}</li>
+          </ul>
+        </Card>
+
+        <Card className="rounded-3xl p-6">
+          <p className="inline-flex rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-200">{pickLocaleText(locale, "Soft Trial (trigger-based)", "Soft Trial (trigger-based)")}</p>
+          <h3 className="mt-3 text-xl font-semibold text-white">{pickLocaleText(locale, "48 jam setelah user engage", "48 hours after user engagement")}</h3>
+          <ul className="mt-4 space-y-2 text-sm text-white/90">
+            <li>• {pickLocaleText(locale, "Tambahan 30 menit voice", "Extra 30 voice minutes")}</li>
+            <li>• {pickLocaleText(locale, "Akses fitur Pro selama trial", "Pro feature access during trial")}</li>
+            <li>• {pickLocaleText(locale, "Aktif setelah 1–2 sesi selesai", "Activated after 1–2 completed sessions")}</li>
+            <li>• {pickLocaleText(locale, "Hanya 1x trial per user", "Only 1 trial per user")}</li>
+          </ul>
+        </Card>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">

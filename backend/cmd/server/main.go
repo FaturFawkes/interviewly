@@ -16,6 +16,7 @@ import (
 	"github.com/interview_app/backend/internal/service/ai"
 	"github.com/interview_app/backend/internal/service/notification"
 	"github.com/interview_app/backend/internal/service/payment"
+	"github.com/interview_app/backend/internal/service/subscription"
 	"github.com/interview_app/backend/internal/service/voice"
 	"github.com/interview_app/backend/internal/usecase"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -29,7 +30,7 @@ func main() {
 		defer postgresCleanup()
 	}
 
-	redisCleanup := setupRedis(cfg)
+	redisCache, redisCleanup := setupRedis(cfg)
 	if redisCleanup != nil {
 		defer redisCleanup()
 	}
@@ -44,11 +45,13 @@ func main() {
 	jobHandler := handler.NewJobHandler(interviewUC)
 	resumeHandler := handler.NewResumeHandler(interviewUC)
 	questionHandler := handler.NewQuestionHandler(interviewUC)
+	subscriptionService := subscription.NewService(cfg, postgresPool, redisCache)
+	subscriptionHandler := handler.NewSubscriptionHandler(subscriptionService)
 	voiceService := voice.NewService(cfg)
-	voiceHandler := handler.NewVoiceHandler(voiceService)
+	voiceHandler := handler.NewVoiceHandler(voiceService, subscriptionService)
 	paymentService := payment.NewService(cfg)
 	paymentHandler := handler.NewPaymentHandler(paymentService)
-	sessionHandler := handler.NewSessionHandler(interviewUC)
+	sessionHandler := handler.NewSessionHandler(interviewUC, subscriptionService)
 	feedbackHandler := handler.NewFeedbackHandler(interviewUC)
 	progressHandler := handler.NewProgressHandler(interviewUC)
 	meHandler := handler.NewMeHandler()
@@ -59,7 +62,7 @@ func main() {
 	authMiddleware := middleware.AuthMiddleware(cfg)
 
 	// Setup router
-	r := router.Setup(healthHandler, authHandler, meHandler, jobHandler, resumeHandler, questionHandler, voiceHandler, paymentHandler, sessionHandler, feedbackHandler, progressHandler, authMiddleware)
+	r := router.Setup(healthHandler, authHandler, meHandler, jobHandler, resumeHandler, questionHandler, voiceHandler, paymentHandler, sessionHandler, subscriptionHandler, feedbackHandler, progressHandler, authMiddleware)
 
 	addr := fmt.Sprintf(":%s", cfg.ServerPort)
 	log.Printf("Server starting on %s (env: %s)", addr, cfg.Env)
@@ -84,15 +87,15 @@ func setupPostgres(cfg *config.Config) (*pgxpool.Pool, func()) {
 	return pool, pool.Close
 }
 
-func setupRedis(cfg *config.Config) func() {
+func setupRedis(cfg *config.Config) (*cache.RedisCache, func()) {
 	redisCache, err := cache.NewRedisCache(cfg)
 	if err != nil {
 		log.Printf("Redis not initialized: %v", err)
-		return nil
+		return nil, nil
 	}
 	if redisCache == nil {
 		log.Println("Redis not initialized: REDIS_ADDR is empty")
-		return nil
+		return nil, nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -100,7 +103,7 @@ func setupRedis(cfg *config.Config) func() {
 
 	if err := redisCache.Set(ctx, "cache:startup:ping", "pong", time.Minute); err != nil {
 		log.Printf("Redis SET failed: %v", err)
-		return func() {
+		return redisCache, func() {
 			_ = redisCache.Close()
 		}
 	}
@@ -108,13 +111,13 @@ func setupRedis(cfg *config.Config) func() {
 	value, err := redisCache.Get(ctx, "cache:startup:ping")
 	if err != nil {
 		log.Printf("Redis GET failed: %v", err)
-		return func() {
+		return redisCache, func() {
 			_ = redisCache.Close()
 		}
 	}
 
 	log.Printf("Redis cache verified, value=%s", value)
-	return func() {
+	return redisCache, func() {
 		_ = redisCache.Close()
 	}
 }

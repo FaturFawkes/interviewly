@@ -40,7 +40,7 @@ func NewService(cfg *config.Config) *Service {
 	secretKey := ""
 	successURL := "http://localhost:3000?payment=success"
 	cancelURL := "http://localhost:3000?payment=cancel"
-	currency := "usd"
+	currency := "idr"
 	starterPriceID := ""
 	proPriceID := ""
 	elitePriceID := ""
@@ -56,29 +56,29 @@ func NewService(cfg *config.Config) *Service {
 	}
 
 	if currency == "" {
-		currency = "usd"
+		currency = "idr"
 	}
 
 	plans := map[string]Plan{
 		"starter": {
 			ID:          "starter",
 			Name:        "Starter",
-			Description: "For focused solo prep",
-			AmountCents: 1900,
+			Description: "30 sessions/month + 30 voice minutes/month",
+			AmountCents: 59000,
 			PriceID:     starterPriceID,
 		},
 		"pro": {
 			ID:          "pro",
 			Name:        "Pro Career Boost",
-			Description: "For high-intent job seekers",
-			AmountCents: 3900,
+			Description: "Unlimited text sessions + 120 voice minutes/month",
+			AmountCents: 129000,
 			PriceID:     proPriceID,
 		},
 		"elite": {
 			ID:          "elite",
 			Name:        "Elite",
-			Description: "For accelerated interview mastery",
-			AmountCents: 7900,
+			Description: "Unlimited text sessions + 300 voice minutes/month",
+			AmountCents: 279000,
 			PriceID:     elitePriceID,
 		},
 	}
