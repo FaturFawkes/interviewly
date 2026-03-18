@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/upload", label: "Upload JD", icon: Upload },
+  { href: "/upload", label: "Upload Resume (CV)", icon: Upload },
   { href: "/practice", label: "Practice", icon: MessageSquare },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ];

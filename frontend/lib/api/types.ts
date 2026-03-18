@@ -20,6 +20,13 @@ export type ResumeRecord = {
   created_at: string;
 };
 
+export type ResumeAIAnalysis = {
+  summary: string;
+  response: string;
+  highlights: string[];
+  recommendations: string[];
+};
+
 export type StoredQuestion = {
   id: string;
   user_id: string;

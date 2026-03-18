@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { useInterviewFlow } from "@/hooks/useInterviewFlow";
 import { api } from "@/lib/api/endpoints";
+import type { FeedbackRecord } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 type ConnectionMode = "initializing" | "agent" | "fallback";
@@ -19,6 +20,48 @@ type TranscriptItem = {
   message: string;
 };
 
+type PendingAnswerTurn = {
+  question: string;
+  answer: string;
+};
+
+const AGENT_QUESTION_PATTERN = /\?|^(what|why|how|when|where|which|who|tell me|walk me|describe|explain|can you|could you|would you|jelaskan|ceritakan|bagaimana|mengapa|kapan|siapa|apa|bisakah|dapatkah)/i;
+const PUBLIC_APP_ENV = (process.env.NEXT_PUBLIC_APP_ENV ?? "").trim().toLowerCase();
+const HIDE_TRANSCRIPT_IN_PRODUCTION = PUBLIC_APP_ENV === "production"
+  || (PUBLIC_APP_ENV === "" && process.env.NODE_ENV === "production");
+const DEFAULT_VOICE_CALL_MAX_SECONDS = 15 * 60;
+const RAW_VOICE_CALL_MAX_SECONDS = Number.parseInt(process.env.NEXT_PUBLIC_VOICE_CALL_MAX_SECONDS ?? "", 10);
+const VOICE_CALL_MAX_SECONDS = Number.isFinite(RAW_VOICE_CALL_MAX_SECONDS) && RAW_VOICE_CALL_MAX_SECONDS > 0
+  ? RAW_VOICE_CALL_MAX_SECONDS
+  : DEFAULT_VOICE_CALL_MAX_SECONDS;
+const DASHBOARD_REDIRECT_DELAY_MS = 2500;
+const DEFAULT_COMPLETION_POPUP_MESSAGE = "Latihan interview telah selesai dan Anda akan kembali ke halaman dashboard.";
+
+function resolveSessionLanguage(interviewLanguage?: string): "en" | "id" {
+  return interviewLanguage === "id" ? "id" : "en";
+}
+
+function normalizeTranscript(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function isLikelyQuestion(value: string): boolean {
+  const normalized = normalizeTranscript(value);
+  if (!normalized) {
+    return false;
+  }
+
+  return AGENT_QUESTION_PATTERN.test(normalized);
+}
+
+function truncateContext(value: string, maxLength: number): string {
+  const normalized = normalizeTranscript(value);
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength)}...`;
+}
 export default function VoiceCallPage() {
   const router = useRouter();
   const {
@@ -26,12 +69,12 @@ export default function VoiceCallPage() {
     questions,
     currentQuestion,
     currentIndex,
+    setupContext,
     feedback,
     error,
     timerSeconds,
-    submitAnswerText,
     completeSession,
-    goToNextQuestion,
+    resetInterviewFlow,
     sessionCompleted,
   } = useInterviewFlow();
 
@@ -43,16 +86,21 @@ export default function VoiceCallPage() {
       : "Medium";
   const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
   const conversationRef = useRef<Conversation | null>(null);
-  const announcedQuestionIDRef = useRef<string>("");
-  const pendingAnswerQueueRef = useRef<string[]>([]);
+  const pendingAnswerQueueRef = useRef<PendingAnswerTurn[]>([]);
   const queueRunningRef = useRef(false);
   const startingConversationRef = useRef(false);
   const processedAgentEventIDsRef = useRef<Set<number>>(new Set());
   const processedUserEventIDsRef = useRef<Set<number>>(new Set());
   const recentMessageDedupRef = useRef<Map<string, number>>(new Map());
+  const activeAgentQuestionRef = useRef<string>("");
+  const activeUserAnswerPartsRef = useRef<string[]>([]);
+  const userTurnFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionFinalizingRef = useRef(false);
+  const timeLimitHandledRef = useRef(false);
+  const isCallActiveRef = useRef(true);
+  const dashboardRedirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const questionsRef = useRef(questions);
-  const currentIndexRef = useRef(currentIndex);
-  const questionCountRef = useRef(questions.length);
+  const evaluatedTurnsRef = useRef(Math.max(currentIndex, 0));
   const sessionCompletedRef = useRef(sessionCompleted);
 
   const [isCallActive, setIsCallActive] = useState(true);
@@ -63,13 +111,34 @@ export default function VoiceCallPage() {
   const [agentMode, setAgentMode] = useState<Mode>("listening");
   const [conversationID, setConversationID] = useState<string | null>(null);
   const [transcriptItems, setTranscriptItems] = useState<TranscriptItem[]>([]);
+  const [activeQuestionLabel, setActiveQuestionLabel] = useState<string>("AI interviewer will ask the first question shortly.");
+  const [latestFeedback, setLatestFeedback] = useState<FeedbackRecord | null>(feedback ?? null);
+  const [evaluatedTurns, setEvaluatedTurns] = useState<number>(currentIndex);
+  const [showCompletionPopup, setShowCompletionPopup] = useState(false);
+  const [completionPopupMessage, setCompletionPopupMessage] = useState<string>(DEFAULT_COMPLETION_POPUP_MESSAGE);
+  const showTranscriptPanel = !HIDE_TRANSCRIPT_IN_PRODUCTION;
+  const selectedInterviewLanguage = resolveSessionLanguage(session?.interview_language);
+  const remainingCallSeconds = Math.max(VOICE_CALL_MAX_SECONDS - timerSeconds, 0);
+  const callProgressPercent = Math.min(100, Math.round((timerSeconds / VOICE_CALL_MAX_SECONDS) * 100));
 
   useEffect(() => {
     questionsRef.current = questions;
-    currentIndexRef.current = currentIndex;
-    questionCountRef.current = questions.length;
     sessionCompletedRef.current = sessionCompleted;
+    evaluatedTurnsRef.current = Math.max(evaluatedTurnsRef.current, currentIndex);
+    setEvaluatedTurns((previous) => Math.max(previous, evaluatedTurnsRef.current));
   }, [currentIndex, questions, sessionCompleted]);
+
+  useEffect(() => {
+    isCallActiveRef.current = isCallActive;
+  }, [isCallActive]);
+
+  useEffect(() => {
+    if (!feedback) {
+      return;
+    }
+
+    setLatestFeedback(feedback);
+  }, [feedback]);
 
   useEffect(() => {
     if (!transcriptContainerRef.current) {
@@ -96,15 +165,60 @@ export default function VoiceCallPage() {
       ? "Use Bahasa Indonesia only for all spoken responses."
       : "Use English only for all spoken responses.";
 
+    const targetRole = normalizeTranscript(setupContext?.targetRole ?? session?.target_role ?? "");
+    const targetCompany = normalizeTranscript(setupContext?.targetCompany ?? session?.target_company ?? "");
+    const roleInstruction = targetRole
+      ? `Target role for this mock interview: ${targetRole}.`
+      : "Target role is not explicitly provided, infer a realistic role context from the job description.";
+    const companyInstruction = targetCompany
+      ? `Target company context: ${targetCompany}.`
+      : "Target company context is optional and may be ignored if unavailable.";
+
+    const jobDescriptionContext = truncateContext(setupContext?.jobDescription ?? "", 1100);
+    const jobInstruction = jobDescriptionContext
+      ? `Use this job description as the primary source of interview topics: ${jobDescriptionContext}`
+      : "Use available role and interview metadata when job description text is unavailable.";
+
     return [
       "You are the interviewer for a voice mock interview session.",
       languageInstruction,
+      roleInstruction,
+      companyInstruction,
       `Interview mode: ${session?.interview_mode ?? "voice"}.`,
       `Difficulty level: ${session?.interview_difficulty ?? "medium"}.`,
+      jobInstruction,
+      `Interview time limit: ${VOICE_CALL_MAX_SECONDS} seconds. Keep the conversation paced to fit within this duration.`,
+      "Do not rely on a pre-scripted fixed list of questions.",
+      "Ask one clear question at a time and wait for candidate response before moving on.",
       "Keep responses natural and conversational.",
       "Do not speak JSON, code blocks, or machine-readable payloads.",
     ].join(" ");
-  }, [session?.interview_difficulty, session?.interview_language, session?.interview_mode]);
+  }, [session?.interview_difficulty, session?.interview_language, session?.interview_mode, session?.target_company, session?.target_role, setupContext?.jobDescription, setupContext?.targetCompany, setupContext?.targetRole]);
+
+  const redirectToDashboardNow = useCallback(() => {
+    if (dashboardRedirectTimeoutRef.current) {
+      clearTimeout(dashboardRedirectTimeoutRef.current);
+      dashboardRedirectTimeoutRef.current = null;
+    }
+
+    resetInterviewFlow();
+    router.push("/dashboard");
+  }, [resetInterviewFlow, router]);
+
+  const openCompletionPopupAndRedirect = useCallback((message?: string) => {
+    setCompletionPopupMessage(message ?? DEFAULT_COMPLETION_POPUP_MESSAGE);
+    setShowCompletionPopup(true);
+
+    if (dashboardRedirectTimeoutRef.current) {
+      clearTimeout(dashboardRedirectTimeoutRef.current);
+    }
+
+    dashboardRedirectTimeoutRef.current = setTimeout(() => {
+      dashboardRedirectTimeoutRef.current = null;
+      resetInterviewFlow();
+      router.push("/dashboard");
+    }, DASHBOARD_REDIRECT_DELAY_MS);
+  }, [resetInterviewFlow, router]);
 
   const endAgentConversation = useCallback(async () => {
     const activeConversation = conversationRef.current;
@@ -122,6 +236,12 @@ export default function VoiceCallPage() {
 
   useEffect(() => {
     return () => {
+      if (userTurnFlushTimerRef.current) {
+        clearTimeout(userTurnFlushTimerRef.current);
+      }
+      if (dashboardRedirectTimeoutRef.current) {
+        clearTimeout(dashboardRedirectTimeoutRef.current);
+      }
       void endAgentConversation();
     };
   }, [endAgentConversation]);
@@ -135,44 +255,132 @@ export default function VoiceCallPage() {
 
     try {
       while (pendingAnswerQueueRef.current.length > 0) {
-        const nextAnswer = pendingAnswerQueueRef.current.shift();
+        const nextTurn = pendingAnswerQueueRef.current.shift();
 
-        if (!nextAnswer || !isCallActive || sessionCompletedRef.current) {
+        if (!nextTurn || sessionCompletedRef.current || !session?.id) {
           continue;
         }
 
-        const lastQuestion = currentIndexRef.current >= questionCountRef.current - 1;
-        setVoiceInfo("Analyzing your answer...");
-
-        const submitted = await submitAnswerText(nextAnswer);
-        if (!submitted) {
-          setVoiceError("Failed to evaluate answer.");
-          continue;
-        }
-
-        if (lastQuestion) {
-          await completeSession();
-          setVoiceInfo("Interview completed.");
-
-          if (conversationRef.current) {
-            try {
-              conversationRef.current.sendContextualUpdate(
-                "The interview has been completed. Thank the candidate and close the session politely.",
-              );
-            } catch {
-              setVoiceError("Unable to send final context update to the agent.");
-            }
-          }
-
+        if (questionsRef.current.length === 0) {
+          setVoiceError("No scoring question slots available for this session.");
           break;
         }
 
-        goToNextQuestion();
+        const slotIndex = evaluatedTurnsRef.current % questionsRef.current.length;
+        const slotQuestion = questionsRef.current[slotIndex];
+
+        setVoiceInfo("Analyzing your answer...");
+
+        try {
+          await api.submitInterviewAnswer(session.id, slotQuestion.id, nextTurn.answer);
+          const scoredFeedback = await api.generateFeedback(
+            session.id,
+            slotQuestion.id,
+            nextTurn.question,
+            nextTurn.answer,
+          );
+          setLatestFeedback(scoredFeedback);
+          evaluatedTurnsRef.current += 1;
+          setEvaluatedTurns(evaluatedTurnsRef.current);
+        } catch (submitError) {
+          setVoiceError(submitError instanceof Error ? submitError.message : "Failed to evaluate answer.");
+          continue;
+        }
+
+        setVoiceInfo("Answer scored. Continue with the next question naturally.");
       }
     } finally {
       queueRunningRef.current = false;
     }
-  }, [completeSession, goToNextQuestion, isCallActive, submitAnswerText]);
+  }, [session?.id]);
+
+  const flushActiveTurnForScoring = useCallback(() => {
+    if (userTurnFlushTimerRef.current) {
+      clearTimeout(userTurnFlushTimerRef.current);
+      userTurnFlushTimerRef.current = null;
+    }
+
+    const activeQuestion = normalizeTranscript(activeAgentQuestionRef.current);
+    const activeAnswer = normalizeTranscript(activeUserAnswerPartsRef.current.join(" "));
+
+    if (!activeQuestion || !activeAnswer) {
+      return;
+    }
+
+    pendingAnswerQueueRef.current.push({ question: activeQuestion, answer: activeAnswer });
+    activeUserAnswerPartsRef.current = [];
+    void processPendingAnswers();
+  }, [processPendingAnswers]);
+
+  const scheduleTurnFlush = useCallback(() => {
+    if (userTurnFlushTimerRef.current) {
+      clearTimeout(userTurnFlushTimerRef.current);
+    }
+
+    userTurnFlushTimerRef.current = setTimeout(() => {
+      flushActiveTurnForScoring();
+    }, 3500);
+  }, [flushActiveTurnForScoring]);
+
+  const waitForPendingScoring = useCallback(async () => {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if (!queueRunningRef.current && pendingAnswerQueueRef.current.length === 0) {
+        return;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+  }, []);
+
+  const finalizeInterviewSession = useCallback(async (options?: {
+    redirectToPractice?: boolean;
+    redirectToDashboardWithPopup?: boolean;
+    closingContextMessage?: string;
+    finalInfoMessage?: string;
+    completionPopupMessage?: string;
+  }) => {
+    if (sessionFinalizingRef.current) {
+      return;
+    }
+
+    sessionFinalizingRef.current = true;
+
+    try {
+      setVoiceInfo(options?.finalInfoMessage ?? "Finalizing interview and saving results...");
+      flushActiveTurnForScoring();
+      await waitForPendingScoring();
+
+      if (!sessionCompletedRef.current) {
+        const completed = await completeSession();
+        sessionCompletedRef.current = completed;
+      }
+
+      if (options?.closingContextMessage && conversationRef.current) {
+        try {
+          conversationRef.current.sendContextualUpdate(options.closingContextMessage);
+          await new Promise((resolve) => setTimeout(resolve, 1800));
+        } catch {
+          setVoiceError("Unable to send final context update to the agent.");
+        }
+      }
+
+      isCallActiveRef.current = false;
+      await endAgentConversation();
+      setIsCallActive(false);
+
+      if (options?.redirectToDashboardWithPopup) {
+        openCompletionPopupAndRedirect(options.completionPopupMessage);
+        return;
+      }
+
+      if (options?.redirectToPractice) {
+        resetInterviewFlow();
+        router.push("/practice");
+      }
+    } finally {
+      sessionFinalizingRef.current = false;
+    }
+  }, [completeSession, endAgentConversation, flushActiveTurnForScoring, openCompletionPopupAndRedirect, resetInterviewFlow, router, waitForPendingScoring]);
 
   const startAgentConversation = useCallback(async () => {
     if (conversationRef.current || startingConversationRef.current || !isCallActive) {
@@ -184,6 +392,7 @@ export default function VoiceCallPage() {
     setVoiceError(null);
     setVoiceInfo("Connecting to ElevenLabs agent...");
     setAgentStatus("connecting");
+    timeLimitHandledRef.current = false;
 
     try {
       const agentSession = await api.createVoiceAgentSession();
@@ -192,6 +401,14 @@ export default function VoiceCallPage() {
         signedUrl: agentSession.signed_url,
         connectionType: "websocket",
         userId: session?.id,
+        overrides: {
+          agent: {
+            language: selectedInterviewLanguage,
+          },
+        },
+        dynamicVariables: {
+          interview_language: selectedInterviewLanguage,
+        },
         onConnect: ({ conversationId }) => {
           setConversationID(conversationId ?? null);
           setVoiceInfo("Connected. Speak naturally with the interviewer.");
@@ -211,10 +428,18 @@ export default function VoiceCallPage() {
           setVoiceError(message || "Agent connection error.");
         },
         onDisconnect: () => {
+          flushActiveTurnForScoring();
           setAgentStatus("disconnected");
-          if (isCallActive) {
-            setVoiceInfo("Agent disconnected.");
+
+          if (!isCallActiveRef.current || sessionFinalizingRef.current) {
+            return;
           }
+
+          void finalizeInterviewSession({
+            redirectToDashboardWithPopup: true,
+            finalInfoMessage: "Agent ended the call. Finalizing interview and saving results...",
+            completionPopupMessage: DEFAULT_COMPLETION_POPUP_MESSAGE,
+          });
         },
         onMessage: ({ role, message, event_id }) => {
           const trimmedMessage = message.trim();
@@ -244,7 +469,20 @@ export default function VoiceCallPage() {
               }
             }
 
-            appendTranscript("agent", trimmedMessage);
+            if (showTranscriptPanel) {
+              appendTranscript("agent", trimmedMessage);
+            }
+
+            if (isLikelyQuestion(trimmedMessage)) {
+              if (activeAgentQuestionRef.current && activeUserAnswerPartsRef.current.length > 0) {
+                flushActiveTurnForScoring();
+              }
+
+              activeAgentQuestionRef.current = trimmedMessage;
+              setActiveQuestionLabel(trimmedMessage);
+              setVoiceInfo("AI interviewer is asking a new question.");
+            }
+
             return;
           }
 
@@ -262,9 +500,16 @@ export default function VoiceCallPage() {
             }
           }
 
-          appendTranscript("user", trimmedMessage);
-          pendingAnswerQueueRef.current.push(trimmedMessage);
-          void processPendingAnswers();
+          if (showTranscriptPanel) {
+            appendTranscript("user", trimmedMessage);
+          }
+
+          if (!activeAgentQuestionRef.current) {
+            return;
+          }
+
+          activeUserAnswerPartsRef.current.push(trimmedMessage);
+          scheduleTurnFlush();
         },
       });
 
@@ -283,7 +528,7 @@ export default function VoiceCallPage() {
     } finally {
       startingConversationRef.current = false;
     }
-  }, [appendTranscript, buildAgentContextInstruction, isCallActive, processPendingAnswers, session?.id]);
+  }, [appendTranscript, buildAgentContextInstruction, finalizeInterviewSession, flushActiveTurnForScoring, isCallActive, scheduleTurnFlush, selectedInterviewLanguage, session?.id, showTranscriptPanel]);
 
   useEffect(() => {
     if (!isCallActive || !currentQuestion || connectionMode !== "initializing") {
@@ -294,39 +539,36 @@ export default function VoiceCallPage() {
   }, [connectionMode, currentQuestion, isCallActive, startAgentConversation]);
 
   useEffect(() => {
-    if (
-      connectionMode !== "agent" ||
-      agentStatus !== "connected" ||
-      !isCallActive ||
-      !currentQuestion?.id ||
-      !currentQuestion.question ||
-      !conversationRef.current ||
-      sessionCompleted
-    ) {
+    if (!sessionCompleted) {
       return;
     }
 
-    if (announcedQuestionIDRef.current === currentQuestion.id) {
+    flushActiveTurnForScoring();
+  }, [flushActiveTurnForScoring, sessionCompleted]);
+
+  useEffect(() => {
+    if (!isCallActive || sessionCompleted || connectionMode !== "agent") {
       return;
     }
 
-    announcedQuestionIDRef.current = currentQuestion.id;
-
-    try {
-      conversationRef.current.sendContextualUpdate(
-        `${buildAgentContextInstruction()} Interview context update: Ask this exact question: "${currentQuestion.question}". Wait for candidate answer before continuing.`,
-      );
-      setVoiceInfo("AI interviewer is asking the current question.");
-    } catch {
-      setVoiceError("Failed to send question context to AI interviewer.");
+    if (timerSeconds < VOICE_CALL_MAX_SECONDS || timeLimitHandledRef.current) {
+      return;
     }
-  }, [agentStatus, buildAgentContextInstruction, connectionMode, currentQuestion?.id, currentQuestion?.question, isCallActive, sessionCompleted]);
+
+    timeLimitHandledRef.current = true;
+    void finalizeInterviewSession({
+      closingContextMessage: "The interview time limit has been reached. End the session now with one brief closing sentence and thank the candidate.",
+      finalInfoMessage: "Call duration limit reached. Finalizing interview and score...",
+      redirectToDashboardWithPopup: true,
+      completionPopupMessage: DEFAULT_COMPLETION_POPUP_MESSAGE,
+    });
+  }, [connectionMode, finalizeInterviewSession, isCallActive, sessionCompleted, timerSeconds]);
 
   function endCall() {
-    setIsCallActive(false);
-    setVoiceInfo("Call ended.");
-    void endAgentConversation();
-    router.push("/practice");
+    void finalizeInterviewSession({
+      redirectToPractice: true,
+      finalInfoMessage: "Ending call and saving interview results...",
+    });
   }
 
   function openVoiceSetup() {
@@ -343,9 +585,13 @@ export default function VoiceCallPage() {
   const listeningState = connectionMode === "agent" && agentMode === "listening";
 
   const statusLabel = connectionMode === "agent"
-    ? agentMode === "speaking"
-      ? "AI Interviewer speaking"
-      : "Listening for your answer"
+    ? agentStatus === "connecting"
+      ? "Connecting to interviewer"
+      : agentStatus === "disconnected"
+        ? "Disconnected"
+        : agentMode === "speaking"
+          ? "AI Interviewer speaking"
+          : "Listening for your answer"
     : connectionMode === "initializing"
       ? "Connecting AI Interviewer"
       : "Disconnected";
@@ -393,8 +639,13 @@ export default function VoiceCallPage() {
 
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-cyan-200">
-                Question {currentIndex + 1}/{questions.length}
+                Evaluated turns: {evaluatedTurns}
               </span>
+              {session?.target_role && (
+                <span className="rounded-full border border-fuchsia-300/30 bg-fuchsia-400/10 px-3 py-1 text-fuchsia-100">
+                  Role: {session.target_role}
+                </span>
+              )}
               <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-white/85">
                 {interviewLanguageLabel}
               </span>
@@ -403,6 +654,9 @@ export default function VoiceCallPage() {
               </span>
               <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-white/85">
                 {formatTimer(timerSeconds)}
+              </span>
+              <span className="rounded-full border border-amber-300/35 bg-amber-400/10 px-3 py-1 text-amber-100">
+                Remaining {formatTimer(remainingCallSeconds)} / {formatTimer(VOICE_CALL_MAX_SECONDS)}
               </span>
               <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-white/85">{statusLabel}</span>
               {connectionMode === "agent" && conversationID && (
@@ -413,20 +667,11 @@ export default function VoiceCallPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            {questions.map((item, index) => (
-              <div
-                key={item.id}
-                className={cn(
-                  "h-1.5 rounded-full transition-all",
-                  index === currentIndex
-                    ? "w-8 bg-gradient-to-r from-purple-500 to-cyan-400"
-                    : index < currentIndex
-                      ? "w-6 bg-purple-500/30"
-                      : "w-6 bg-white/[0.08]",
-                )}
-              />
-            ))}
+          <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 transition-all duration-500"
+              style={{ width: `${callProgressPercent}%` }}
+            />
           </div>
         </header>
 
@@ -437,7 +682,7 @@ export default function VoiceCallPage() {
             <Card className="space-y-5 p-5 md:p-6">
               <div>
                 <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">AI Interviewer</p>
-                <p className="mt-2 text-base leading-relaxed text-white/95 md:text-lg">{currentQuestion.question}</p>
+                <p className="mt-2 text-base leading-relaxed text-white/95 md:text-lg">{activeQuestionLabel}</p>
               </div>
 
             {(error || voiceError || voiceInfo) && (
@@ -448,7 +693,7 @@ export default function VoiceCallPage() {
               </div>
             )}
 
-              {connectionMode === "agent" ? (
+              {connectionMode === "agent" && showTranscriptPanel ? (
                 <div>
                   <p className="mb-2 text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Interview Transcript</p>
                   <div
@@ -478,6 +723,12 @@ export default function VoiceCallPage() {
                     ))}
                   </div>
                 </div>
+              ) : connectionMode === "agent" ? (
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                  <p className="text-sm text-white/70">
+                    Transcript is hidden in production environment for privacy.
+                  </p>
+                </div>
               ) : (
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
                   <p className="text-sm text-white/70">
@@ -497,16 +748,31 @@ export default function VoiceCallPage() {
                 </Button>
               </div>
 
-              {feedback && (
+              {latestFeedback && (
                 <div className="rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-3">
                   <p className="text-xs uppercase tracking-wide text-cyan-200/80">Latest Feedback</p>
-                  <p className="mt-1 text-sm text-cyan-100">Score {feedback.score}/100 · {feedback.star_feedback}</p>
+                  <p className="mt-1 text-sm text-cyan-100">Score {latestFeedback.score}/100 · {latestFeedback.star_feedback}</p>
                 </div>
               )}
             </Card>
           </div>
         </main>
       </div>
+
+      {showCompletionPopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+          <Card className="w-full max-w-md rounded-3xl border border-cyan-300/25 bg-[rgba(10,15,26,0.96)] p-6 text-center">
+            <p className="text-xs uppercase tracking-wide text-cyan-200/80">Interview Completed</p>
+            <h3 className="mt-2 text-xl font-semibold text-white">Sesi Latihan Selesai</h3>
+            <p className="mt-3 text-sm leading-relaxed text-white/80">{completionPopupMessage}</p>
+            <p className="mt-2 text-xs text-cyan-100/75">Mengalihkan ke dashboard...</p>
+
+            <div className="mt-5 flex justify-center">
+              <Button onClick={redirectToDashboardNow}>Ke Dashboard Sekarang</Button>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

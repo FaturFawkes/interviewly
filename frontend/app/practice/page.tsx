@@ -44,7 +44,12 @@ export default function PracticePage() {
   } = useInterviewFlow();
 
   const isLastQuestion = currentIndex >= questions.length - 1;
-  const hasActiveVoiceSession = Boolean(currentQuestion && session?.interview_mode === "voice");
+  const hasActiveVoiceSession = Boolean(
+    currentQuestion
+    && session?.interview_mode === "voice"
+    && session?.status === "active"
+    && !sessionCompleted,
+  );
 
   async function handleStartInterview(payload: {
     jobDescription: string;

@@ -21,6 +21,15 @@ type SetupPayload = {
   targetCompany?: string;
 };
 
+type InterviewSetupContext = {
+  jobDescription: string;
+  interviewMode: InterviewMode;
+  interviewLanguage: InterviewLanguage;
+  interviewDifficulty: InterviewDifficulty;
+  targetRole: string;
+  targetCompany: string;
+};
+
 type UseInterviewFlowOptions = {
   storageKey?: string;
 };
@@ -33,6 +42,7 @@ type PersistedFlowState = {
   feedback: FeedbackRecord | null;
   lastScore: number;
   timerSeconds: number;
+  setupContext: InterviewSetupContext | null;
 };
 
 export function useInterviewFlow(options?: UseInterviewFlowOptions) {
@@ -43,6 +53,7 @@ export function useInterviewFlow(options?: UseInterviewFlowOptions) {
   const [answer, setAnswer] = useState("");
   const [feedback, setFeedback] = useState<FeedbackRecord | null>(null);
   const [lastScore, setLastScore] = useState(0);
+  const [setupContext, setSetupContext] = useState<InterviewSetupContext | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timerSeconds, setTimerSeconds] = useState(0);
@@ -69,6 +80,7 @@ export function useInterviewFlow(options?: UseInterviewFlowOptions) {
       setFeedback(parsed.feedback ?? null);
       setLastScore(typeof parsed.lastScore === "number" ? parsed.lastScore : 0);
       setTimerSeconds(typeof parsed.timerSeconds === "number" ? parsed.timerSeconds : 0);
+      setSetupContext(parsed.setupContext ?? null);
     } catch {
       window.sessionStorage.removeItem(storageKey);
     }
@@ -87,10 +99,11 @@ export function useInterviewFlow(options?: UseInterviewFlowOptions) {
       feedback,
       lastScore,
       timerSeconds,
+      setupContext,
     };
 
     window.sessionStorage.setItem(storageKey, JSON.stringify(payload));
-  }, [answer, currentIndex, feedback, lastScore, questions, session, storageKey, timerSeconds]);
+  }, [answer, currentIndex, feedback, lastScore, questions, session, setupContext, storageKey, timerSeconds]);
 
   const currentQuestion = useMemo(() => questions[currentIndex] ?? null, [questions, currentIndex]);
 
@@ -151,6 +164,14 @@ export function useInterviewFlow(options?: UseInterviewFlowOptions) {
       setAnswer("");
       setFeedback(null);
       setLastScore(0);
+      setSetupContext({
+        jobDescription,
+        interviewMode,
+        interviewLanguage,
+        interviewDifficulty,
+        targetRole: targetRole ?? "",
+        targetCompany: targetCompany ?? "",
+      });
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to initialize interview.");
@@ -253,6 +274,22 @@ export function useInterviewFlow(options?: UseInterviewFlowOptions) {
     }
   }
 
+  function resetInterviewFlow(): void {
+    setQuestions([]);
+    setSession(null);
+    setCurrentIndex(0);
+    setAnswer("");
+    setFeedback(null);
+    setLastScore(0);
+    setTimerSeconds(0);
+    setSetupContext(null);
+    setError(null);
+
+    if (typeof window !== "undefined") {
+      window.sessionStorage.removeItem(storageKey);
+    }
+  }
+
   function goToNextQuestion(): void {
     if (currentIndex >= questions.length - 1) {
       return;
@@ -276,11 +313,13 @@ export function useInterviewFlow(options?: UseInterviewFlowOptions) {
     loading,
     error,
     timerSeconds,
+    setupContext,
     initializeInterview,
     submitCurrentAnswer,
     submitAnswerText,
     submitVoiceAnswer,
     completeSession,
+    resetInterviewFlow,
     goToNextQuestion,
     sessionCompleted,
   };

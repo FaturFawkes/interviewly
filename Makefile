@@ -26,7 +26,7 @@ compose-build:
 
 compose-rebuild:
 	$(COMPOSE) down
-	$(COMPOSE) build --no-cache
+	$(COMPOSE) build
 	$(MAKE) compose-up
 
 compose-clean-images:

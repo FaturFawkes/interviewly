@@ -7,6 +7,7 @@ import type {
   InterviewLanguage,
   InterviewMode,
   ParsedJobDescription,
+  ResumeAIAnalysis,
   PracticeSession,
   ProgressMetrics,
   ResumeRecord,
@@ -28,6 +29,17 @@ export const api = {
     apiRequest("/api/resume", {
       method: "POST",
       body: { content: resumeText },
+    }),
+
+  getLatestResume: (): Promise<ResumeRecord> =>
+    apiRequest("/api/resume", {
+      method: "GET",
+    }),
+
+  analyzeResume: (resumeText?: string): Promise<ResumeAIAnalysis> =>
+    apiRequest("/api/resume/analyze", {
+      method: "POST",
+      body: { content: resumeText ?? "" },
     }),
 
   generateQuestions: (

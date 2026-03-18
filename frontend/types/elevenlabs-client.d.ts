@@ -10,13 +10,36 @@ declare module "@elevenlabs/client" {
 
   export type ConversationSessionOptions = {
     signedUrl: string;
-    connectionType?: "websocket" | string;
+    connectionType?: "websocket" | "webrtc" | string;
     userId?: string;
+    overrides?: {
+      agent?: {
+        prompt?: {
+          prompt?: string;
+        };
+        firstMessage?: string;
+        language?: string;
+      };
+      tts?: {
+        voiceId?: string;
+        speed?: number;
+        stability?: number;
+        similarityBoost?: number;
+      };
+      conversation?: {
+        textOnly?: boolean;
+      };
+      client?: {
+        source?: string;
+        version?: string;
+      };
+    };
+    dynamicVariables?: Record<string, string | number | boolean>;
     onConnect?: (payload: { conversationId?: string }) => void;
     onStatusChange?: (payload: { status: Status }) => void;
     onModeChange?: (payload: { mode: Mode }) => void;
     onError?: (message?: string) => void;
-    onDisconnect?: () => void;
+    onDisconnect?: (payload?: { reason?: string; code?: number }) => void;
     onMessage?: (payload: MessageEvent) => void;
   };
 
