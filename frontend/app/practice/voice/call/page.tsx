@@ -7,8 +7,10 @@ import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { useLanguage } from "@/components/providers/LanguageProvider";
 import { useInterviewFlow } from "@/hooks/useInterviewFlow";
 import { api } from "@/lib/api/endpoints";
+import { pickLocaleText } from "@/lib/i18n";
 import type { FeedbackRecord } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -67,6 +69,7 @@ function truncateContext(value: string, maxLength: number): string {
 }
 export default function VoiceCallPage() {
   const router = useRouter();
+  const { locale } = useLanguage();
   const {
     session,
     questions,
@@ -108,14 +111,14 @@ export default function VoiceCallPage() {
 
   const [isCallActive, setIsCallActive] = useState(true);
   const [voiceError, setVoiceError] = useState<string | null>(null);
-  const [voiceInfo, setVoiceInfo] = useState<string | null>("Connecting to AI interviewer...");
+  const [voiceInfo, setVoiceInfo] = useState<string | null>(pickLocaleText(locale, "Menghubungkan ke interviewer AI...", "Connecting to AI interviewer..."));
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>("initializing");
   const [agentStatus, setAgentStatus] = useState<Status>("disconnected");
   const [agentMode, setAgentMode] = useState<Mode>("listening");
   const [conversationID, setConversationID] = useState<string | null>(null);
   const [transcriptItems, setTranscriptItems] = useState<TranscriptItem[]>([]);
   const [isMuted, setIsMuted] = useState(false);
-  const [activeQuestionLabel, setActiveQuestionLabel] = useState<string>("AI interviewer will ask the first question shortly.");
+  const [activeQuestionLabel, setActiveQuestionLabel] = useState<string>(pickLocaleText(locale, "Interviewer AI akan segera mengajukan pertanyaan pertama.", "AI interviewer will ask the first question shortly."));
   const [latestFeedback, setLatestFeedback] = useState<FeedbackRecord | null>(feedback ?? null);
   const [evaluatedTurns, setEvaluatedTurns] = useState<number>(currentIndex);
   const [showCompletionPopup, setShowCompletionPopup] = useState(false);
@@ -273,7 +276,7 @@ export default function VoiceCallPage() {
         const slotIndex = evaluatedTurnsRef.current % questionsRef.current.length;
         const slotQuestion = questionsRef.current[slotIndex];
 
-        setVoiceInfo("Analyzing your answer...");
+        setVoiceInfo(pickLocaleText(locale, "Menganalisis jawaban Anda...", "Analyzing your answer..."));
 
         try {
           await api.submitInterviewAnswer(session.id, slotQuestion.id, nextTurn.answer);
@@ -291,7 +294,7 @@ export default function VoiceCallPage() {
           continue;
         }
 
-        setVoiceInfo("Answer scored. Continue with the next question naturally.");
+        setVoiceInfo(pickLocaleText(locale, "Jawaban sudah dinilai. Lanjutkan ke pertanyaan berikutnya secara natural.", "Answer scored. Continue with the next question naturally."));
       }
     } finally {
       queueRunningRef.current = false;
@@ -350,7 +353,7 @@ export default function VoiceCallPage() {
     sessionFinalizingRef.current = true;
 
     try {
-      setVoiceInfo(options?.finalInfoMessage ?? "Finalizing interview and saving results...");
+      setVoiceInfo(options?.finalInfoMessage ?? pickLocaleText(locale, "Menyelesaikan interview dan menyimpan hasil...", "Finalizing interview and saving results..."));
       flushActiveTurnForScoring();
       await waitForPendingScoring();
 
@@ -394,7 +397,7 @@ export default function VoiceCallPage() {
     startingConversationRef.current = true;
 
     setVoiceError(null);
-    setVoiceInfo("Connecting to ElevenLabs agent...");
+    setVoiceInfo(pickLocaleText(locale, "Menghubungkan ke agen ElevenLabs...", "Connecting to ElevenLabs agent..."));
     setAgentStatus("connecting");
     timeLimitHandledRef.current = false;
 
@@ -415,7 +418,7 @@ export default function VoiceCallPage() {
         },
         onConnect: ({ conversationId }) => {
           setConversationID(conversationId ?? null);
-          setVoiceInfo("Connected. Speak naturally with the interviewer.");
+          setVoiceInfo(pickLocaleText(locale, "Terhubung. Bicaralah secara natural dengan interviewer.", "Connected. Speak naturally with the interviewer."));
           try {
             conversationRef.current?.sendContextualUpdate(buildAgentContextInstruction());
           } catch {
@@ -484,7 +487,7 @@ export default function VoiceCallPage() {
 
               activeAgentQuestionRef.current = trimmedMessage;
               setActiveQuestionLabel(trimmedMessage);
-              setVoiceInfo("AI interviewer is asking a new question.");
+              setVoiceInfo(pickLocaleText(locale, "Interviewer AI sedang mengajukan pertanyaan baru.", "AI interviewer is asking a new question."));
             }
 
             return;
@@ -529,11 +532,11 @@ export default function VoiceCallPage() {
       setConnectionMode("fallback");
       setAgentStatus("disconnected");
       setVoiceError(agentError instanceof Error ? agentError.message : "Unable to connect to ElevenLabs agent.");
-      setVoiceInfo("AI interviewer is unavailable. End call and try again from voice setup.");
+      setVoiceInfo(pickLocaleText(locale, "Interviewer AI tidak tersedia. Akhiri panggilan dan coba lagi dari pengaturan voice.", "AI interviewer is unavailable. End call and try again from voice setup."));
     } finally {
       startingConversationRef.current = false;
     }
-  }, [appendTranscript, buildAgentContextInstruction, finalizeInterviewSession, flushActiveTurnForScoring, isCallActive, isMuted, scheduleTurnFlush, selectedInterviewLanguage, session?.id, showTranscriptPanel]);
+  }, [appendTranscript, buildAgentContextInstruction, finalizeInterviewSession, flushActiveTurnForScoring, isCallActive, isMuted, locale, scheduleTurnFlush, selectedInterviewLanguage, session?.id, showTranscriptPanel]);
 
   useEffect(() => {
     if (!isCallActive || !currentQuestion || connectionMode !== "initializing") {
@@ -597,15 +600,15 @@ export default function VoiceCallPage() {
 
   const statusLabel = connectionMode === "agent"
     ? agentStatus === "connecting"
-      ? "Connecting to interviewer"
+      ? pickLocaleText(locale, "Menghubungkan ke interviewer", "Connecting to interviewer")
       : agentStatus === "disconnected"
-        ? "Disconnected"
+        ? pickLocaleText(locale, "Terputus", "Disconnected")
         : agentMode === "speaking"
-          ? "AI Interviewer speaking"
-          : "Listening for your answer"
+          ? pickLocaleText(locale, "Interviewer AI sedang berbicara", "AI Interviewer speaking")
+          : pickLocaleText(locale, "Mendengarkan jawaban Anda", "Listening for your answer")
     : connectionMode === "initializing"
-      ? "Connecting AI Interviewer"
-      : "Disconnected";
+      ? pickLocaleText(locale, "Menghubungkan Interviewer AI", "Connecting AI Interviewer")
+      : pickLocaleText(locale, "Terputus", "Disconnected");
 
   if (!currentQuestion) {
     return (
@@ -618,13 +621,13 @@ export default function VoiceCallPage() {
           <div className="mb-5 inline-flex h-16 w-16 items-center justify-center rounded-3xl border border-white/15 bg-gradient-to-br from-purple-500/30 to-cyan-500/20">
             <Sparkles className="h-8 w-8 text-cyan-100" />
           </div>
-          <h1 className="text-2xl font-semibold">No active interview session</h1>
+          <h1 className="text-2xl font-semibold">{pickLocaleText(locale, "Tidak ada sesi interview aktif", "No active interview session")}</h1>
           <p className="mt-2 max-w-xl text-sm text-[var(--color-text-muted)]">
-            Start from Practice setup and choose Voice interview mode first.
+            {pickLocaleText(locale, "Mulai dari pengaturan Practice dan pilih mode interview suara terlebih dahulu.", "Start from Practice setup and choose Voice interview mode first.")}
           </p>
           <Button onClick={openVoiceSetup} className="mt-6">
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to voice setup
+            {pickLocaleText(locale, "Kembali ke pengaturan suara", "Back to voice setup")}
           </Button>
         </div>
       </div>
@@ -642,19 +645,19 @@ export default function VoiceCallPage() {
         <header className="space-y-3 rounded-[20px] border border-white/10 bg-[rgba(17,24,36,0.72)] px-4 py-3 backdrop-blur-xl md:px-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg text-white tracking-tight">Interview Session</h2>
+              <h2 className="text-lg text-white tracking-tight">{pickLocaleText(locale, "Sesi Interview", "Interview Session")}</h2>
               <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-              {connectionMode === "agent" ? "Voice mode · AI Interviewer" : "Preparing AI Interviewer"}
+              {connectionMode === "agent" ? pickLocaleText(locale, "Mode suara · Interviewer AI", "Voice mode · AI Interviewer") : pickLocaleText(locale, "Menyiapkan Interviewer AI", "Preparing AI Interviewer")}
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-cyan-200">
-                Evaluated turns: {evaluatedTurns}
+                {pickLocaleText(locale, "Giliran dinilai", "Evaluated turns")}: {evaluatedTurns}
               </span>
               {session?.target_role && (
                 <span className="rounded-full border border-fuchsia-300/30 bg-fuchsia-400/10 px-3 py-1 text-fuchsia-100">
-                  Role: {session.target_role}
+                  {pickLocaleText(locale, "Role", "Role")}: {session.target_role}
                 </span>
               )}
               <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-white/85">
@@ -667,7 +670,7 @@ export default function VoiceCallPage() {
                 {formatTimer(timerSeconds)}
               </span>
               <span className="rounded-full border border-amber-300/35 bg-amber-400/10 px-3 py-1 text-amber-100">
-                Remaining {formatTimer(remainingCallSeconds)} / {formatTimer(VOICE_CALL_MAX_SECONDS)}
+                {pickLocaleText(locale, "Sisa", "Remaining")} {formatTimer(remainingCallSeconds)} / {formatTimer(VOICE_CALL_MAX_SECONDS)}
               </span>
               <span className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-white/85">{statusLabel}</span>
               {connectionMode === "agent" && conversationID && (
@@ -697,12 +700,12 @@ export default function VoiceCallPage() {
                 disabled={connectionMode !== "agent"}
               >
                 {isMuted ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
-                {isMuted ? "Unmute" : "Mute"}
+                    {isMuted ? pickLocaleText(locale, "Bunyikan", "Unmute") : pickLocaleText(locale, "Bisukan", "Mute")}
               </Button>
             )}
             <Button variant="secondary" onClick={endCall} className="border-red-400/50 text-red-200 hover:border-red-300/70">
               <PhoneOff className="mr-2 h-4 w-4" />
-              End Session
+                  {pickLocaleText(locale, "Akhiri Sesi", "End Session")}
             </Button>
           </div>
 
@@ -801,6 +804,7 @@ function VoiceOrb({
   isListening: boolean;
   isCallActive: boolean;
 }) {
+  const { locale } = useLanguage();
   const stateClass = isSpeaking
     ? "voice-liquid-orb--speaking"
     : isListening
@@ -831,7 +835,13 @@ function VoiceOrb({
         <div className="relative z-10 flex flex-col items-center">
           <Sparkles className={cn("h-8 w-8 text-white/90", isSpeaking && "animate-pulse")} />
           <p className="mt-2 text-xs font-medium text-white/90">
-            {isSpeaking ? "Speaking" : isListening ? "Listening" : isCallActive ? "Ready" : "Idle"}
+            {isSpeaking
+              ? pickLocaleText(locale, "Berbicara", "Speaking")
+              : isListening
+                ? pickLocaleText(locale, "Mendengarkan", "Listening")
+                : isCallActive
+                  ? pickLocaleText(locale, "Siap", "Ready")
+                  : pickLocaleText(locale, "Diam", "Idle")}
           </p>
         </div>
       </div>

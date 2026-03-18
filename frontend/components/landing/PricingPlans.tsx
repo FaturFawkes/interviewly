@@ -2,28 +2,41 @@
 
 import { useState } from "react";
 
+import { useLanguage } from "@/components/providers/LanguageProvider";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { api } from "@/lib/api/endpoints";
+import { pickLocaleText } from "@/lib/i18n";
 import type { PaymentPlanID } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 type PricingPlan = {
   id: PaymentPlanID;
-  title: string;
-  subtitle: string;
+  titleID: string;
+  titleEN: string;
+  subtitleID: string;
+  subtitleEN: string;
   priceLabel: string;
-  badge?: string;
-  features: string[];
+  badgeID?: string;
+  badgeEN?: string;
+  featuresID: string[];
+  featuresEN: string[];
 };
 
 const pricingPlans: PricingPlan[] = [
   {
     id: "starter",
-    title: "Starter",
-    subtitle: "For focused solo prep",
+    titleID: "Starter",
+    titleEN: "Starter",
+    subtitleID: "Untuk latihan mandiri yang fokus",
+    subtitleEN: "For focused solo prep",
     priceLabel: "$19",
-    features: [
+    featuresID: [
+      "30 sesi interview/bulan",
+      "Skoring AI + feedback STAR",
+      "Dasbor analitik progres",
+    ],
+    featuresEN: [
       "30 interview sessions/month",
       "AI scoring + STAR feedback",
       "Progress analytics dashboard",
@@ -31,11 +44,19 @@ const pricingPlans: PricingPlan[] = [
   },
   {
     id: "pro",
-    title: "Pro Career Boost",
-    subtitle: "For high-intent job seekers",
+    titleID: "Pro Career Boost",
+    titleEN: "Pro Career Boost",
+    subtitleID: "Untuk pencari kerja yang serius",
+    subtitleEN: "For high-intent job seekers",
     priceLabel: "$39",
-    badge: "Most popular",
-    features: [
+    badgeID: "Paling populer",
+    badgeEN: "Most popular",
+    featuresID: [
+      "Sesi tanpa batas",
+      "Analisis kecocokan role mendalam",
+      "Kecepatan respons AI prioritas",
+    ],
+    featuresEN: [
       "Unlimited sessions",
       "Deep role-fit analysis",
       "Priority AI response speed",
@@ -43,10 +64,17 @@ const pricingPlans: PricingPlan[] = [
   },
   {
     id: "elite",
-    title: "Elite",
-    subtitle: "For accelerated interview mastery",
+    titleID: "Elite",
+    titleEN: "Elite",
+    subtitleID: "Untuk akselerasi penguasaan interview",
+    subtitleEN: "For accelerated interview mastery",
     priceLabel: "$79",
-    features: [
+    featuresID: [
+      "Semua fitur Pro",
+      "Insight strategi interview lanjutan",
+      "Dukungan prioritas",
+    ],
+    featuresEN: [
       "Everything in Pro",
       "Advanced interview strategy insights",
       "Priority support",
@@ -55,6 +83,7 @@ const pricingPlans: PricingPlan[] = [
 ];
 
 export function PricingPlans() {
+  const { locale } = useLanguage();
   const [loadingPlanID, setLoadingPlanID] = useState<PaymentPlanID | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
@@ -65,12 +94,12 @@ export function PricingPlans() {
     try {
       const response = await api.createCheckoutSession(planID);
       if (!response.checkout_url) {
-        throw new Error("Checkout URL is empty.");
+        throw new Error(pickLocaleText(locale, "URL checkout kosong.", "Checkout URL is empty."));
       }
 
       window.location.href = response.checkout_url;
     } catch (error) {
-      setCheckoutError(error instanceof Error ? error.message : "Failed to create checkout session.");
+      setCheckoutError(error instanceof Error ? error.message : pickLocaleText(locale, "Gagal membuat sesi checkout.", "Failed to create checkout session."));
       setLoadingPlanID(null);
     }
   }
@@ -78,8 +107,8 @@ export function PricingPlans() {
   return (
     <section className="space-y-4">
       <div className="text-center">
-        <h3 className="text-2xl font-semibold text-white">Simple monthly pricing</h3>
-        <p className="mt-2 text-sm text-muted">Choose a plan and continue to secure checkout.</p>
+        <h3 className="text-2xl font-semibold text-white">{pickLocaleText(locale, "Paket bulanan sederhana", "Simple monthly pricing")}</h3>
+        <p className="mt-2 text-sm text-muted">{pickLocaleText(locale, "Pilih paket lalu lanjut ke checkout aman.", "Choose a plan and continue to secure checkout.")}</p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -89,18 +118,18 @@ export function PricingPlans() {
 
           return (
             <Card key={plan.id} className={cn("rounded-3xl p-6", isHighlighted && "glow-border")}>
-              {plan.badge && (
+              {plan.badgeID && (
                 <p className="inline-flex rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-200">
-                  {plan.badge}
+                  {pickLocaleText(locale, plan.badgeID ?? "", plan.badgeEN ?? "")}
                 </p>
               )}
-              <h3 className={cn("text-xl font-semibold text-white", plan.badge && "mt-3")}>{plan.title}</h3>
-              <p className="mt-1 text-sm text-muted">{plan.subtitle}</p>
+              <h3 className={cn("text-xl font-semibold text-white", plan.badgeID && "mt-3")}>{pickLocaleText(locale, plan.titleID, plan.titleEN)}</h3>
+              <p className="mt-1 text-sm text-muted">{pickLocaleText(locale, plan.subtitleID, plan.subtitleEN)}</p>
               <p className="mt-5 text-4xl font-bold text-white">{plan.priceLabel}</p>
-              <p className="text-xs text-muted">per month</p>
+              <p className="text-xs text-muted">{pickLocaleText(locale, "per bulan", "per month")}</p>
 
               <ul className="mt-5 space-y-2 text-sm text-white/90">
-                {plan.features.map((feature) => (
+                {(locale === "id" ? plan.featuresID : plan.featuresEN).map((feature) => (
                   <li key={feature}>• {feature}</li>
                 ))}
               </ul>
@@ -113,7 +142,7 @@ export function PricingPlans() {
                 }}
                 disabled={loadingPlanID !== null}
               >
-                {isLoading ? "Redirecting..." : "Choose plan"}
+                {isLoading ? pickLocaleText(locale, "Mengalihkan...", "Redirecting...") : pickLocaleText(locale, "Pilih paket", "Choose plan")}
               </Button>
             </Card>
           );

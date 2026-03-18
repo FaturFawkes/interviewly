@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AuthSessionProvider } from "@/components/providers/AuthSessionProvider";
+import { LanguageProvider } from "@/components/providers/LanguageProvider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,7 +16,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "AI Interview Coach",
-  description: "Practice smarter interviews with real-time AI coaching and analytics.",
+  description: "Latih interview lebih cerdas dengan coaching AI real-time dan analitik progres.",
 };
 
 export default function RootLayout({
@@ -24,9 +25,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="id">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <AuthSessionProvider>{children}</AuthSessionProvider>
+        <AuthSessionProvider>
+          <LanguageProvider>{children}</LanguageProvider>
+        </AuthSessionProvider>
       </body>
     </html>
   );

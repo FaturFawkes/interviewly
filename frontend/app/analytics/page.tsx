@@ -5,9 +5,11 @@ import dynamic from "next/dynamic";
 import { Brain, Clock, Target, TrendingUp } from "lucide-react";
 
 import { AppShell } from "@/components/layout/AppShell";
+import { useLanguage } from "@/components/providers/LanguageProvider";
 import { ChartCard } from "@/components/charts/ChartCard";
 import { GlassCard, GradientBorderCard } from "@/components/ui/GlassCard";
 import { api } from "@/lib/api/endpoints";
+import { pickLocaleText } from "@/lib/i18n";
 import type { AnalyticsOverview } from "@/lib/api/types";
 
 const ScoreHistoryChart = dynamic(
@@ -47,6 +49,7 @@ function buildStrengthWeaknessData(weakAreas: string[], averageScore: number) {
 }
 
 export default function AnalyticsPage() {
+	const { locale } = useLanguage();
 	const [state, setState] = useState<ProgressState>({
 		averageScore: 0,
 		sessionsCompleted: 0,
@@ -100,68 +103,68 @@ export default function AnalyticsPage() {
 	}, [state.history]);
 
 	const recommendedImprovements = state.weakAreas.length
-		? state.weakAreas.map((item) => `Focus 2 short STAR answers around ${item.toLowerCase()}.`)
-		: ["No personalized recommendations yet. Complete a practice session first."];
+		? state.weakAreas.map((item) => pickLocaleText(locale, `Fokuskan 2 jawaban STAR singkat pada ${item.toLowerCase()}.`, `Focus 2 short STAR answers around ${item.toLowerCase()}.`))
+		: [pickLocaleText(locale, "Belum ada rekomendasi personal. Selesaikan sesi latihan terlebih dahulu.", "No personalized recommendations yet. Complete a practice session first.")];
 
 	return (
-		<AppShell title="Progress Analytics" subtitle="Track your improvement and identify areas for growth">
+		<AppShell title={pickLocaleText(locale, "Analitik Progres", "Progress Analytics")} subtitle={pickLocaleText(locale, "Pantau peningkatan Anda dan identifikasi area untuk berkembang", "Track your improvement and identify areas for growth")}>
 			<div className="space-y-6">
 				<section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
 					<GlassCard className="p-5" glowColor="purple">
 						<div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-purple-500 to-purple-700">
 							<Target className="h-5 w-5 text-white" />
 						</div>
-						<p className="text-white/40 text-sm">Interview Readiness</p>
+						<p className="text-white/40 text-sm">{pickLocaleText(locale, "Kesiapan Interview", "Interview Readiness")}</p>
 						<p className="text-2xl text-white mt-0.5">{readiness}%</p>
-						<p className="text-white/25 text-xs mt-1">Ready for interviews</p>
+						<p className="text-white/25 text-xs mt-1">{pickLocaleText(locale, "Siap untuk interview", "Ready for interviews")}</p>
 					</GlassCard>
 					<GlassCard className="p-5">
 						<div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-green-500 to-green-700">
 							<TrendingUp className="h-5 w-5 text-white" />
 						</div>
-						<p className="text-white/40 text-sm">Avg. Score Trend</p>
+						<p className="text-white/40 text-sm">{pickLocaleText(locale, "Tren Rata-rata Skor", "Avg. Score Trend")}</p>
 						<p className="text-2xl text-white mt-0.5">{avgScoreTrend >= 0 ? "+" : ""}{avgScoreTrend}</p>
-						<p className="text-white/25 text-xs mt-1">Session trend</p>
+						<p className="text-white/25 text-xs mt-1">{pickLocaleText(locale, "Tren sesi", "Session trend")}</p>
 					</GlassCard>
 					<GlassCard className="p-5">
 						<div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-blue-500 to-blue-700">
 							<Brain className="h-5 w-5 text-white" />
 						</div>
-						<p className="text-white/40 text-sm">Weak Areas</p>
+						<p className="text-white/40 text-sm">{pickLocaleText(locale, "Area Lemah", "Weak Areas")}</p>
 						<p className="text-2xl text-white mt-0.5">{state.weakAreas.length}</p>
-						<p className="text-white/25 text-xs mt-1">Needs practice</p>
+						<p className="text-white/25 text-xs mt-1">{pickLocaleText(locale, "Perlu latihan", "Needs practice")}</p>
 					</GlassCard>
 					<GlassCard className="p-5">
 						<div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-cyan-500 to-cyan-700">
 							<Clock className="h-5 w-5 text-white" />
 						</div>
-						<p className="text-white/40 text-sm">Sessions</p>
+						<p className="text-white/40 text-sm">{pickLocaleText(locale, "Sesi", "Sessions")}</p>
 						<p className="text-2xl text-white mt-0.5">{state.sessionsCompleted}</p>
-						<p className="text-white/25 text-xs mt-1">Total completed interviews</p>
+						<p className="text-white/25 text-xs mt-1">{pickLocaleText(locale, "Total interview selesai", "Total completed interviews")}</p>
 					</GlassCard>
 				</section>
 
 				<section className="grid gap-4 xl:grid-cols-2">
-					<ChartCard title="Score History" subtitle="Behavioral and technical trajectory">
+					<ChartCard title={pickLocaleText(locale, "Riwayat Skor", "Score History")} subtitle={pickLocaleText(locale, "Trajektori behavioral dan teknikal", "Behavioral and technical trajectory")}>
 						{state.history.length > 0 ? (
 							<ScoreHistoryChart data={state.history} />
 						) : (
-							<div className="flex h-full items-center justify-center text-sm text-muted">No session data yet.</div>
+							<div className="flex h-full items-center justify-center text-sm text-muted">{pickLocaleText(locale, "Belum ada data sesi.", "No session data yet.")}</div>
 						)}
 					</ChartCard>
-					<ChartCard title="Strength vs Weakness" subtitle="Capability radar summary">
+					<ChartCard title={pickLocaleText(locale, "Kekuatan vs Kelemahan", "Strength vs Weakness")} subtitle={pickLocaleText(locale, "Ringkasan radar kapabilitas", "Capability radar summary")}>
 						{state.strengthWeakness.length > 0 ? (
 							<StrengthWeaknessChart data={state.strengthWeakness} />
 						) : (
-							<div className="flex h-full items-center justify-center text-sm text-muted">No weak-area data yet.</div>
+							<div className="flex h-full items-center justify-center text-sm text-muted">{pickLocaleText(locale, "Belum ada data area lemah.", "No weak-area data yet.")}</div>
 						)}
 					</ChartCard>
 				</section>
 
 				<GradientBorderCard>
 					<div className="p-6">
-						<h3 className="text-white mb-1">Practice Recommendations</h3>
-						<p className="text-white/40 text-sm mb-5">AI-suggested topics based on weak areas</p>
+						<h3 className="text-white mb-1">{pickLocaleText(locale, "Rekomendasi Latihan", "Practice Recommendations")}</h3>
+						<p className="text-white/40 text-sm mb-5">{pickLocaleText(locale, "Topik rekomendasi AI berdasarkan area lemah", "AI-suggested topics based on weak areas")}</p>
 						<div className="grid md:grid-cols-2 gap-4">
 							{recommendedImprovements.map((item, index) => (
 								<GlassCard key={`${item}-${index}`} className="p-4 hover:bg-white/4" glowColor="none">
@@ -179,14 +182,14 @@ export default function AnalyticsPage() {
 
 						{state.recentSessions.length > 0 && (
 							<div className="mt-6">
-								<p className="mb-3 text-sm text-white/50">Recent sessions</p>
+								<p className="mb-3 text-sm text-white/50">{pickLocaleText(locale, "Sesi terbaru", "Recent sessions")}</p>
 								<div className="space-y-2">
 									{state.recentSessions.slice(0, 4).map((session) => (
 										<div
 											key={session.id}
 											className="flex items-center justify-between rounded-xl border border-white/10 bg-white/4 px-3 py-2"
 										>
-											<p className="text-sm text-white/80">Session {session.id.slice(0, 6)}</p>
+											<p className="text-sm text-white/80">{pickLocaleText(locale, "Sesi", "Session")} {session.id.slice(0, 6)}</p>
 											<p className="text-sm text-cyan-300">{session.score}/100</p>
 										</div>
 									))}

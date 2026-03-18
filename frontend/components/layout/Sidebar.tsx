@@ -15,13 +15,15 @@ import {
   X,
 } from "lucide-react";
 
+import { useLanguage } from "@/components/providers/LanguageProvider";
+import { pickLocaleText } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/upload", label: "Upload Resume (CV)", icon: Upload },
-  { href: "/practice", label: "Practice", icon: MessageSquare },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/dashboard", labelID: "Dasbor", labelEN: "Dashboard", icon: LayoutDashboard },
+  { href: "/upload", labelID: "Unggah Resume (CV)", labelEN: "Upload Resume (CV)", icon: Upload },
+  { href: "/practice", labelID: "Latihan", labelEN: "Practice", icon: MessageSquare },
+  { href: "/analytics", labelID: "Analitik", labelEN: "Analytics", icon: BarChart3 },
 ];
 
 type SidebarProps = {
@@ -31,6 +33,7 @@ type SidebarProps = {
 
 export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const { locale } = useLanguage();
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -52,7 +55,7 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
             type="button"
             onClick={() => setCollapsed((value) => !value)}
             className="ml-auto rounded-md p-1 text-white/40 transition-colors hover:text-white/80"
-            aria-label="Collapse sidebar"
+            aria-label={pickLocaleText(locale, "Ciutkan sidebar", "Collapse sidebar")}
           >
             <ChevronLeft className={cn("h-4 w-4 transition-transform", collapsed && "rotate-180")} />
           </button>
@@ -61,7 +64,7 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
             type="button"
             onClick={onClose}
             className="rounded-md p-1 text-white/70 hover:bg-white/10 hover:text-white lg:hidden"
-            aria-label="Close sidebar"
+            aria-label={pickLocaleText(locale, "Tutup sidebar", "Close sidebar")}
           >
             <X className="h-4 w-4" />
           </button>
@@ -71,6 +74,7 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href;
+            const label = pickLocaleText(locale, item.labelID, item.labelEN);
 
             return (
               <Link
@@ -85,7 +89,7 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
                 )}
               >
                 <Icon className={cn("h-5 w-5 shrink-0", active && "text-purple-400")} />
-                {!collapsed && <span className="whitespace-nowrap">{item.label}</span>}
+                {!collapsed && <span className="whitespace-nowrap">{label}</span>}
                 {active && !collapsed && (
                   <div className="ml-auto h-1.5 w-1.5 rounded-full bg-purple-400 shadow-[0_0_6px_rgba(139,92,246,0.8)]" />
                 )}
@@ -100,7 +104,7 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
             className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-white/50 transition-all hover:bg-white/[0.04] hover:text-white/80"
           >
             <Settings className="h-5 w-5 shrink-0" />
-            {!collapsed && <span>Settings</span>}
+            {!collapsed && <span>{pickLocaleText(locale, "Pengaturan", "Settings")}</span>}
           </button>
 
           <Link
@@ -109,7 +113,7 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
             className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-white/50 transition-all hover:bg-red-500/5 hover:text-red-400"
           >
             <LogOut className="h-5 w-5 shrink-0" />
-            {!collapsed && <span>Sign Out</span>}
+            {!collapsed && <span>{pickLocaleText(locale, "Keluar", "Sign Out")}</span>}
           </Link>
         </div>
       </aside>
@@ -119,7 +123,7 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
           type="button"
           className="fixed inset-0 z-30 bg-black/50 lg:hidden"
           onClick={onClose}
-          aria-label="Close sidebar backdrop"
+          aria-label={pickLocaleText(locale, "Tutup latar sidebar", "Close sidebar backdrop")}
         />
       )}
     </>

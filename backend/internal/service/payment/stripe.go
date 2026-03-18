@@ -123,7 +123,7 @@ func (s *Service) CreateCheckoutSession(planID string) (*CheckoutResult, error) 
 	form.Set("allow_promotion_codes", "true")
 	form.Set("metadata[plan_id]", plan.ID)
 
-	if strings.TrimSpace(plan.PriceID) != "" {
+	if isStripePriceID(plan.PriceID) {
 		form.Set("line_items[0][price]", plan.PriceID)
 	} else {
 		form.Set("line_items[0][price_data][currency]", s.currency)
@@ -176,4 +176,13 @@ func (s *Service) CreateCheckoutSession(planID string) (*CheckoutResult, error) 
 		Currency:    s.currency,
 		AmountCents: plan.AmountCents,
 	}, nil
+}
+
+func isStripePriceID(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+
+	return strings.HasPrefix(trimmed, "price_")
 }

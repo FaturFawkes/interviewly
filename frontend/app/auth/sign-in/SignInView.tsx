@@ -3,13 +3,16 @@
 import { useEffect, useState } from "react";
 import { signIn } from "next-auth/react";
 
+import { useLanguage } from "@/components/providers/LanguageProvider";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { pickLocaleText } from "@/lib/i18n";
 
 type SignInProvider = "google" | "azure-ad";
 
 export function SignInView({ callbackUrl }: { callbackUrl: string }) {
+  const { locale } = useLanguage();
   const publicApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api-proxy";
   const [loadingProvider, setLoadingProvider] = useState<SignInProvider | null>(null);
   const [email, setEmail] = useState("");
@@ -59,7 +62,7 @@ export function SignInView({ callbackUrl }: { callbackUrl: string }) {
     });
 
     if (!result || result.error) {
-      setCredentialsError("Invalid email or password.");
+      setCredentialsError(pickLocaleText(locale, "Email atau password tidak valid.", "Invalid email or password."));
       setCredentialsLoading(null);
       return;
     }
@@ -90,15 +93,15 @@ export function SignInView({ callbackUrl }: { callbackUrl: string }) {
         if (payload.retry_after && payload.retry_after > 0) {
           setResendCooldown(payload.retry_after);
         }
-        throw new Error(payload.error ?? "Failed to request OTP.");
+        throw new Error(payload.error ?? pickLocaleText(locale, "Gagal meminta OTP.", "Failed to request OTP."));
       }
 
       const expiryMinutes = payload.expires_in ? Math.round(payload.expires_in / 60) : 10;
       setOtpRequested(true);
       setResendCooldown(payload.resend_available_in ?? 300);
-      setCredentialsInfo(`OTP sent to your email. Expires in ${expiryMinutes} minutes.`);
+      setCredentialsInfo(pickLocaleText(locale, `OTP dikirim ke email Anda. Kadaluarsa dalam ${expiryMinutes} menit.`, `OTP sent to your email. Expires in ${expiryMinutes} minutes.`));
     } catch (error) {
-      setCredentialsError(error instanceof Error ? error.message : "Failed to request OTP.");
+      setCredentialsError(error instanceof Error ? error.message : pickLocaleText(locale, "Gagal meminta OTP.", "Failed to request OTP."));
     } finally {
       setCredentialsLoading(null);
     }
@@ -123,7 +126,7 @@ export function SignInView({ callbackUrl }: { callbackUrl: string }) {
 
       const payload = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
       if (!response.ok) {
-        throw new Error(payload.error ?? "OTP verification failed.");
+        throw new Error(payload.error ?? pickLocaleText(locale, "Verifikasi OTP gagal.", "OTP verification failed."));
       }
 
       setFullName("");
@@ -132,9 +135,9 @@ export function SignInView({ callbackUrl }: { callbackUrl: string }) {
       setOTP("");
       setOtpRequested(false);
       setResendCooldown(0);
-      setCredentialsInfo("Registration successful. Please login with your email and password.");
+      setCredentialsInfo(pickLocaleText(locale, "Registrasi berhasil. Silakan login dengan email dan password Anda.", "Registration successful. Please login with your email and password."));
     } catch (error) {
-      setCredentialsError(error instanceof Error ? error.message : "OTP verification failed.");
+      setCredentialsError(error instanceof Error ? error.message : pickLocaleText(locale, "Verifikasi OTP gagal.", "OTP verification failed."));
     } finally {
       setCredentialsLoading(null);
     }
@@ -159,13 +162,13 @@ export function SignInView({ callbackUrl }: { callbackUrl: string }) {
         if (payload.retry_after && payload.retry_after > 0) {
           setResendCooldown(payload.retry_after);
         }
-        throw new Error(payload.error ?? "Failed to resend OTP.");
+        throw new Error(payload.error ?? pickLocaleText(locale, "Gagal mengirim ulang OTP.", "Failed to resend OTP."));
       }
 
       setResendCooldown(payload.resend_available_in ?? 300);
-      setCredentialsInfo("OTP resent. Please check your inbox and spam folder.");
+      setCredentialsInfo(pickLocaleText(locale, "OTP berhasil dikirim ulang. Periksa inbox dan folder spam Anda.", "OTP resent. Please check your inbox and spam folder."));
     } catch (error) {
-      setCredentialsError(error instanceof Error ? error.message : "Failed to resend OTP.");
+      setCredentialsError(error instanceof Error ? error.message : pickLocaleText(locale, "Gagal mengirim ulang OTP.", "Failed to resend OTP."));
     } finally {
       setCredentialsLoading(null);
     }
@@ -175,8 +178,8 @@ export function SignInView({ callbackUrl }: { callbackUrl: string }) {
     <main className="section-shell flex min-h-screen items-center justify-center py-10">
       <Card className="w-full max-w-md space-y-5">
         <div>
-          <h1 className="text-2xl font-semibold text-white">Sign in to AI Interview Coach</h1>
-          <p className="mt-2 text-sm text-[var(--color-text-muted)]">Continue with your Google or Microsoft account.</p>
+          <h1 className="text-2xl font-semibold text-white">{pickLocaleText(locale, "Masuk ke AI Interview Coach", "Sign in to AI Interview Coach")}</h1>
+          <p className="mt-2 text-sm text-[var(--color-text-muted)]">{pickLocaleText(locale, "Lanjutkan dengan akun Google atau Microsoft Anda.", "Continue with your Google or Microsoft account.")}</p>
         </div>
 
         <div className="space-y-3">
@@ -185,7 +188,7 @@ export function SignInView({ callbackUrl }: { callbackUrl: string }) {
             onClick={() => void handleSignIn("google")}
             disabled={loadingProvider !== null}
           >
-            {loadingProvider === "google" ? "Redirecting..." : "Continue with Google"}
+            {loadingProvider === "google" ? pickLocaleText(locale, "Mengalihkan...", "Redirecting...") : pickLocaleText(locale, "Lanjutkan dengan Google", "Continue with Google")}
           </Button>
 
           <Button
@@ -194,7 +197,7 @@ export function SignInView({ callbackUrl }: { callbackUrl: string }) {
             onClick={() => void handleSignIn("azure-ad")}
             disabled={loadingProvider !== null}
           >
-            {loadingProvider === "azure-ad" ? "Redirecting..." : "Continue with Microsoft"}
+            {loadingProvider === "azure-ad" ? pickLocaleText(locale, "Mengalihkan...", "Redirecting...") : pickLocaleText(locale, "Lanjutkan dengan Microsoft", "Continue with Microsoft")}
           </Button>
 
           <div className="my-2 border-t border-white/10" />
@@ -202,7 +205,7 @@ export function SignInView({ callbackUrl }: { callbackUrl: string }) {
           <Input
             value={fullName}
             onChange={(event) => setFullName(event.target.value)}
-            placeholder="Full name (for register)"
+            placeholder={pickLocaleText(locale, "Nama lengkap (untuk daftar)", "Full name (for register)")}
           />
           <Input
             type="email"
@@ -214,7 +217,7 @@ export function SignInView({ callbackUrl }: { callbackUrl: string }) {
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            placeholder="Password"
+            placeholder={pickLocaleText(locale, "Password", "Password")}
           />
 
           <Button
@@ -222,7 +225,7 @@ export function SignInView({ callbackUrl }: { callbackUrl: string }) {
             onClick={() => void handleRequestOTP()}
             disabled={credentialsLoading !== null || !email.trim() || password.length < 8}
           >
-            {credentialsLoading === "register" ? "Sending OTP..." : "Register with Email"}
+            {credentialsLoading === "register" ? pickLocaleText(locale, "Mengirim OTP...", "Sending OTP...") : pickLocaleText(locale, "Daftar dengan Email", "Register with Email")}
           </Button>
 
           {otpRequested && (
@@ -230,10 +233,10 @@ export function SignInView({ callbackUrl }: { callbackUrl: string }) {
               <Input
                 value={otp}
                 onChange={(event) => setOTP(event.target.value)}
-                placeholder="Input OTP from email"
+                placeholder={pickLocaleText(locale, "Masukkan OTP dari email", "Input OTP from email")}
               />
               <div className="-mt-1 text-xs text-[var(--color-text-muted)]">
-                Didn&apos;t receive the email?{" "}
+                {pickLocaleText(locale, "Belum menerima email?", "Didn&apos;t receive the email?")} {" "}
                 <button
                   type="button"
                   onClick={() => void handleResendOTP()}
@@ -241,10 +244,10 @@ export function SignInView({ callbackUrl }: { callbackUrl: string }) {
                   className="font-medium text-cyan-300 underline decoration-cyan-300/70 underline-offset-2 disabled:cursor-not-allowed disabled:text-white/40 disabled:no-underline"
                 >
                   {credentialsLoading === "resend-otp"
-                    ? "Sending..."
+                    ? pickLocaleText(locale, "Mengirim...", "Sending...")
                     : resendCooldown > 0
-                      ? `Resend OTP in ${formatCooldown(resendCooldown)}`
-                      : "Resend OTP"}
+                      ? pickLocaleText(locale, `Kirim ulang OTP dalam ${formatCooldown(resendCooldown)}`, `Resend OTP in ${formatCooldown(resendCooldown)}`)
+                      : pickLocaleText(locale, "Kirim Ulang OTP", "Resend OTP")}
                 </button>
               </div>
               <Button
@@ -252,7 +255,7 @@ export function SignInView({ callbackUrl }: { callbackUrl: string }) {
                 onClick={() => void handleVerifyOTP()}
                 disabled={credentialsLoading !== null || !otp.trim()}
               >
-                {credentialsLoading === "verify-otp" ? "Verifying OTP..." : "Verify OTP"}
+                {credentialsLoading === "verify-otp" ? pickLocaleText(locale, "Memverifikasi OTP...", "Verifying OTP...") : pickLocaleText(locale, "Verifikasi OTP", "Verify OTP")}
               </Button>
             </>
           )}
@@ -263,7 +266,7 @@ export function SignInView({ callbackUrl }: { callbackUrl: string }) {
             onClick={() => void handleCredentials("login")}
             disabled={credentialsLoading !== null || !email.trim() || !password}
           >
-            {credentialsLoading === "login" ? "Signing in..." : "Login with Email"}
+            {credentialsLoading === "login" ? pickLocaleText(locale, "Masuk...", "Signing in...") : pickLocaleText(locale, "Masuk dengan Email", "Login with Email")}
           </Button>
 
           {credentialsError && <p className="text-sm text-red-300">{credentialsError}</p>}
