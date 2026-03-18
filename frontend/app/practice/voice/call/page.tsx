@@ -1,7 +1,7 @@
 "use client";
 
 import { Conversation, type Mode, type Status } from "@elevenlabs/client";
-import { ArrowLeft, PhoneOff, Sparkles } from "lucide-react";
+import { ArrowLeft, Mic, MicOff, PhoneOff, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -42,7 +42,10 @@ function resolveSessionLanguage(interviewLanguage?: string): "en" | "id" {
 }
 
 function normalizeTranscript(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
+  return value
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function isLikelyQuestion(value: string): boolean {
@@ -111,6 +114,7 @@ export default function VoiceCallPage() {
   const [agentMode, setAgentMode] = useState<Mode>("listening");
   const [conversationID, setConversationID] = useState<string | null>(null);
   const [transcriptItems, setTranscriptItems] = useState<TranscriptItem[]>([]);
+  const [isMuted, setIsMuted] = useState(false);
   const [activeQuestionLabel, setActiveQuestionLabel] = useState<string>("AI interviewer will ask the first question shortly.");
   const [latestFeedback, setLatestFeedback] = useState<FeedbackRecord | null>(feedback ?? null);
   const [evaluatedTurns, setEvaluatedTurns] = useState<number>(currentIndex);
@@ -442,7 +446,7 @@ export default function VoiceCallPage() {
           });
         },
         onMessage: ({ role, message, event_id }) => {
-          const trimmedMessage = message.trim();
+          const trimmedMessage = normalizeTranscript(message);
           if (!trimmedMessage) {
             return;
           }
@@ -514,6 +518,7 @@ export default function VoiceCallPage() {
       });
 
       conversationRef.current = conversation;
+      conversationRef.current?.setVolume?.({ volume: isMuted ? 0 : 1 });
       setConnectionMode("agent");
       setAgentStatus("connected");
 
@@ -528,7 +533,7 @@ export default function VoiceCallPage() {
     } finally {
       startingConversationRef.current = false;
     }
-  }, [appendTranscript, buildAgentContextInstruction, finalizeInterviewSession, flushActiveTurnForScoring, isCallActive, scheduleTurnFlush, selectedInterviewLanguage, session?.id, showTranscriptPanel]);
+  }, [appendTranscript, buildAgentContextInstruction, finalizeInterviewSession, flushActiveTurnForScoring, isCallActive, isMuted, scheduleTurnFlush, selectedInterviewLanguage, session?.id, showTranscriptPanel]);
 
   useEffect(() => {
     if (!isCallActive || !currentQuestion || connectionMode !== "initializing") {
@@ -569,6 +574,12 @@ export default function VoiceCallPage() {
       redirectToPractice: true,
       finalInfoMessage: "Ending call and saving interview results...",
     });
+  }
+
+  function toggleMute() {
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+    conversationRef.current?.setVolume?.({ volume: nextMuted ? 0 : 1 });
   }
 
   function openVoiceSetup() {
@@ -678,6 +689,23 @@ export default function VoiceCallPage() {
         <main className="flex flex-1 flex-col items-center justify-center gap-5 py-6">
           <VoiceOrb isSpeaking={speakingState} isListening={listeningState} isCallActive={isCallActive} />
 
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {HIDE_TRANSCRIPT_IN_PRODUCTION && (
+              <Button
+                variant="secondary"
+                onClick={toggleMute}
+                disabled={connectionMode !== "agent"}
+              >
+                {isMuted ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
+                {isMuted ? "Unmute" : "Mute"}
+              </Button>
+            )}
+            <Button variant="secondary" onClick={endCall} className="border-red-400/50 text-red-200 hover:border-red-300/70">
+              <PhoneOff className="mr-2 h-4 w-4" />
+              End Session
+            </Button>
+          </div>
+
           <div className="w-full max-w-5xl rounded-[20px] bg-gradient-to-r from-purple-500/35 via-cyan-500/30 to-purple-500/35 p-[1px]">
             <Card className="space-y-5 p-5 md:p-6">
               <div>
@@ -723,32 +751,19 @@ export default function VoiceCallPage() {
                     ))}
                   </div>
                 </div>
-              ) : connectionMode === "agent" ? (
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                  <p className="text-sm text-white/70">
-                    Transcript is hidden in production environment for privacy.
-                  </p>
-                </div>
-              ) : (
+              ) : connectionMode !== "agent" ? (
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
                   <p className="text-sm text-white/70">
                     Voice interview runs automatically. If connection drops, end the session and restart from setup.
                   </p>
                 </div>
-              )}
+              ) : null}
 
               <p className="text-xs text-white/60">
                 Keep speaking naturally. Each answer is evaluated automatically.
               </p>
 
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <Button variant="secondary" onClick={endCall} className="border-red-400/50 text-red-200 hover:border-red-300/70">
-                  <PhoneOff className="mr-2 h-4 w-4" />
-                  End Session
-                </Button>
-              </div>
-
-              {latestFeedback && (
+              {!HIDE_TRANSCRIPT_IN_PRODUCTION && latestFeedback && (
                 <div className="rounded-2xl border border-cyan-300/25 bg-cyan-400/10 px-4 py-3">
                   <p className="text-xs uppercase tracking-wide text-cyan-200/80">Latest Feedback</p>
                   <p className="mt-1 text-sm text-cyan-100">Score {latestFeedback.score}/100 · {latestFeedback.star_feedback}</p>

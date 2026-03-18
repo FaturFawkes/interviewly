@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, Brain, ChartNoAxesCombined, FileText, Sparkles } from "lucide-react";
 
 import { Navbar } from "@/components/layout/Navbar";
+import { PricingPlans } from "@/components/landing/PricingPlans";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { testimonials } from "@/lib/mock-data";
@@ -116,33 +117,7 @@ export default function Home() {
           ))}
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-2">
-          <Card className="rounded-[24px] p-6">
-            <h3 className="text-xl font-semibold text-white">Starter</h3>
-            <p className="mt-1 text-sm text-[var(--color-text-muted)]">For focused solo prep</p>
-            <p className="mt-5 text-4xl font-bold text-white">$19</p>
-            <p className="text-xs text-[var(--color-text-muted)]">per month</p>
-            <ul className="mt-5 space-y-2 text-sm text-white/90">
-              <li>• 30 interview sessions/month</li>
-              <li>• AI scoring + STAR feedback</li>
-              <li>• Progress analytics dashboard</li>
-            </ul>
-          </Card>
-          <Card className="glow-border rounded-[24px] p-6">
-            <p className="inline-flex rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-200">
-              Most popular
-            </p>
-            <h3 className="mt-3 text-xl font-semibold text-white">Pro Career Boost</h3>
-            <p className="mt-1 text-sm text-[var(--color-text-muted)]">For high-intent job seekers</p>
-            <p className="mt-5 text-4xl font-bold text-white">$39</p>
-            <p className="text-xs text-[var(--color-text-muted)]">per month</p>
-            <ul className="mt-5 space-y-2 text-sm text-white/90">
-              <li>• Unlimited sessions</li>
-              <li>• Deep role-fit analysis</li>
-              <li>• Priority AI response speed</li>
-            </ul>
-          </Card>
-        </section>
+        <PricingPlans />
       </main>
 
       <footer className="section-shell relative z-10 border-t border-white/10 pt-7 pb-5 text-sm text-[var(--color-text-muted)]">

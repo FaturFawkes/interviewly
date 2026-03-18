@@ -15,6 +15,7 @@ import (
 	"github.com/interview_app/backend/internal/repository"
 	"github.com/interview_app/backend/internal/service/ai"
 	"github.com/interview_app/backend/internal/service/notification"
+	"github.com/interview_app/backend/internal/service/payment"
 	"github.com/interview_app/backend/internal/service/voice"
 	"github.com/interview_app/backend/internal/usecase"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -45,6 +46,8 @@ func main() {
 	questionHandler := handler.NewQuestionHandler(interviewUC)
 	voiceService := voice.NewService(cfg)
 	voiceHandler := handler.NewVoiceHandler(voiceService)
+	paymentService := payment.NewService(cfg)
+	paymentHandler := handler.NewPaymentHandler(paymentService)
 	sessionHandler := handler.NewSessionHandler(interviewUC)
 	feedbackHandler := handler.NewFeedbackHandler(interviewUC)
 	progressHandler := handler.NewProgressHandler(interviewUC)
@@ -56,7 +59,7 @@ func main() {
 	authMiddleware := middleware.AuthMiddleware(cfg)
 
 	// Setup router
-	r := router.Setup(healthHandler, authHandler, meHandler, jobHandler, resumeHandler, questionHandler, voiceHandler, sessionHandler, feedbackHandler, progressHandler, authMiddleware)
+	r := router.Setup(healthHandler, authHandler, meHandler, jobHandler, resumeHandler, questionHandler, voiceHandler, paymentHandler, sessionHandler, feedbackHandler, progressHandler, authMiddleware)
 
 	addr := fmt.Sprintf(":%s", cfg.ServerPort)
 	log.Printf("Server starting on %s (env: %s)", addr, cfg.Env)

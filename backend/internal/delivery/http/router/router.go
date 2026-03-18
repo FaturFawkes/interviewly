@@ -14,6 +14,7 @@ func Setup(
 	resumeHandler *handler.ResumeHandler,
 	questionHandler *handler.QuestionHandler,
 	voiceHandler *handler.VoiceHandler,
+	paymentHandler *handler.PaymentHandler,
 	sessionHandler *handler.SessionHandler,
 	feedbackHandler *handler.FeedbackHandler,
 	progressHandler *handler.ProgressHandler,
@@ -28,6 +29,7 @@ func Setup(
 	r.POST("/auth/register/verify", authHandler.VerifyRegisterOTP)
 	r.POST("/auth/login", authHandler.Login)
 	r.POST("/auth/social-login", authHandler.SocialLogin)
+	r.POST("/payments/checkout", paymentHandler.CreateCheckoutSession)
 
 	api := r.Group("/api")
 	api.Use(authMiddleware)

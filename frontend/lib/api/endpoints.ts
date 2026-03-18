@@ -15,6 +15,8 @@ import type {
   SessionAnswer,
   SessionHistoryResponse,
   AnalyticsOverview,
+  PaymentCheckoutSession,
+  PaymentPlanID,
   VoiceAgentSession,
 } from "@/lib/api/types";
 
@@ -111,4 +113,10 @@ export const api = {
   getProgress: (): Promise<ProgressMetrics> => apiRequest("/api/progress"),
 
   getSessionHistory: (): Promise<SessionHistoryResponse> => apiRequest("/api/session/history"),
+
+  createCheckoutSession: (planID: PaymentPlanID): Promise<PaymentCheckoutSession> =>
+    apiRequest("/payments/checkout", {
+      method: "POST",
+      body: { plan_id: planID },
+    }),
 };

@@ -81,6 +81,15 @@ export type VoiceAgentSession = {
   conversation_id?: string;
 };
 
+export type PaymentPlanID = "starter" | "pro" | "elite";
+
+export type PaymentCheckoutSession = {
+  checkout_url: string;
+  plan_id: PaymentPlanID;
+  currency: string;
+  amount_cents: number;
+};
+
 export type AgentFeedbackPayload = {
   session_id: string;
   question_id: string;

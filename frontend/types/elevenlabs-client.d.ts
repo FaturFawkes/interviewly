@@ -46,6 +46,7 @@ declare module "@elevenlabs/client" {
   export class Conversation {
     static startSession(options: ConversationSessionOptions): Promise<Conversation>;
     sendContextualUpdate(message: string): void;
+    setVolume?(options: { volume: number }): void;
     endSession(): Promise<void>;
   }
 }
