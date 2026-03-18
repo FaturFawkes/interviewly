@@ -126,10 +126,45 @@ export default function VoiceCallPage() {
   const [showCompletionPopup, setShowCompletionPopup] = useState(false);
   const [completionPopupMessage, setCompletionPopupMessage] = useState<string>(DEFAULT_COMPLETION_POPUP_MESSAGE);
   const [voiceLimitSeconds, setVoiceLimitSeconds] = useState<number>(VOICE_CALL_MAX_SECONDS);
+  const [showBackExitModal, setShowBackExitModal] = useState(false);
+  const [backExitAction, setBackExitAction] = useState<"idle" | "ending" | "pausing">("idle");
+  const allowBackNavigationRef = useRef(false);
   const showTranscriptPanel = !HIDE_TRANSCRIPT_IN_PRODUCTION;
   const selectedInterviewLanguage = resolveSessionLanguage(session?.interview_language);
   const remainingCallSeconds = Math.max(voiceLimitSeconds - timerSeconds, 0);
   const callProgressPercent = Math.min(100, Math.round((timerSeconds / Math.max(voiceLimitSeconds, 1)) * 100));
+  const hasActiveVoiceSession = Boolean(session?.id && session?.status === "active" && !sessionCompleted);
+
+  useEffect(() => {
+    if (!session?.id) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const history = await api.getSessionHistory();
+        const hasServerSession = history.sessions.some((item) => item.id === session.id);
+        if (cancelled) {
+          return;
+        }
+
+        if (!hasServerSession) {
+          setVoiceError(pickLocaleText(locale, "Sesi interview tidak lagi tersedia di server. Silakan mulai ulang dari halaman Practice.", "Interview session is no longer available on the server. Please restart from Practice."));
+          resetInterviewFlow();
+          router.push("/practice");
+          return;
+        }
+      } catch {
+        return;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [locale, resetInterviewFlow, router, session?.id]);
 
   useEffect(() => {
     questionsRef.current = questions;
@@ -157,6 +192,43 @@ export default function VoiceCallPage() {
 
     transcriptContainerRef.current.scrollTop = transcriptContainerRef.current.scrollHeight;
   }, [transcriptItems]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !hasActiveVoiceSession) {
+      return;
+    }
+
+    const guardState = { interviewBackGuard: "practice-voice" };
+    window.history.pushState(guardState, "", window.location.href);
+
+    const handlePopState = () => {
+      if (allowBackNavigationRef.current) {
+        return;
+      }
+
+      setShowBackExitModal(true);
+      window.history.pushState(guardState, "", window.location.href);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [hasActiveVoiceSession]);
+
+  const navigateBackWithoutPrompt = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    allowBackNavigationRef.current = true;
+    setShowBackExitModal(false);
+    window.history.back();
+
+    window.setTimeout(() => {
+      allowBackNavigationRef.current = false;
+    }, 300);
+  }, []);
 
   const appendTranscript = useCallback((role: "user" | "agent", message: string) => {
     setTranscriptItems((previous) => {
@@ -293,7 +365,17 @@ export default function VoiceCallPage() {
           evaluatedTurnsRef.current += 1;
           setEvaluatedTurns(evaluatedTurnsRef.current);
         } catch (submitError) {
-          setVoiceError(submitError instanceof Error ? submitError.message : "Failed to evaluate answer.");
+          const message = submitError instanceof Error ? submitError.message : "Failed to evaluate answer.";
+          setVoiceError(message);
+
+          if (message.toLowerCase().includes("session not found")) {
+            pendingAnswerQueueRef.current = [];
+            setVoiceInfo(pickLocaleText(locale, "Sesi interview tidak ditemukan di server. Silakan mulai sesi voice baru dari halaman Practice.", "Interview session was not found on the server. Please start a new voice session from Practice."));
+            resetInterviewFlow();
+            router.push("/practice");
+            return;
+          }
+
           continue;
         }
 
@@ -302,7 +384,7 @@ export default function VoiceCallPage() {
     } finally {
       queueRunningRef.current = false;
     }
-  }, [session?.id]);
+  }, [locale, resetInterviewFlow, router, session?.id]);
 
   const flushActiveTurnForScoring = useCallback(() => {
     if (userTurnFlushTimerRef.current) {
@@ -621,6 +703,59 @@ export default function VoiceCallPage() {
     setVoiceInfo(pickLocaleText(locale, "Peringatan: sisa menit voice kurang dari 10%.", "Warning: remaining voice minutes are below 10%."));
   }, [connectionMode, isCallActive, locale, remainingCallSeconds, voiceLimitSeconds]);
 
+  const handleBackContinueLater = useCallback(async () => {
+    if (backExitAction !== "idle") {
+      return;
+    }
+
+    setBackExitAction("pausing");
+    setVoiceError(null);
+    setVoiceInfo(pickLocaleText(locale, "Menyimpan progres voice interview sebelum keluar...", "Saving voice interview progress before leaving..."));
+
+    flushActiveTurnForScoring();
+    await waitForPendingScoring();
+    await commitVoiceUsageIfNeeded();
+
+    isCallActiveRef.current = false;
+    setIsCallActive(false);
+    await endAgentConversation();
+
+    setBackExitAction("idle");
+    navigateBackWithoutPrompt();
+  }, [backExitAction, commitVoiceUsageIfNeeded, endAgentConversation, flushActiveTurnForScoring, locale, navigateBackWithoutPrompt, waitForPendingScoring]);
+
+  const handleBackEndSession = useCallback(async () => {
+    if (backExitAction !== "idle") {
+      return;
+    }
+
+    setBackExitAction("ending");
+    setVoiceError(null);
+    setVoiceInfo(pickLocaleText(locale, "Mengakhiri sesi interview dan menyimpan hasil...", "Ending interview session and saving results..."));
+
+    flushActiveTurnForScoring();
+    await waitForPendingScoring();
+    await commitVoiceUsageIfNeeded();
+
+    if (!sessionCompletedRef.current) {
+      const completed = await completeSession();
+      sessionCompletedRef.current = completed;
+
+      if (!completed) {
+        setBackExitAction("idle");
+        return;
+      }
+    }
+
+    isCallActiveRef.current = false;
+    setIsCallActive(false);
+    await endAgentConversation();
+
+    resetInterviewFlow();
+    setBackExitAction("idle");
+    navigateBackWithoutPrompt();
+  }, [backExitAction, commitVoiceUsageIfNeeded, completeSession, endAgentConversation, flushActiveTurnForScoring, locale, navigateBackWithoutPrompt, resetInterviewFlow, waitForPendingScoring]);
+
   function endCall() {
     void finalizeInterviewSession({
       redirectToPractice: true,
@@ -825,6 +960,58 @@ export default function VoiceCallPage() {
           </div>
         </main>
       </div>
+
+      {showBackExitModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/75 px-4 backdrop-blur-sm">
+          <Card className="w-full max-w-md border border-white/15 bg-[rgba(10,15,26,0.96)] p-6">
+            <h3 className="text-base font-semibold text-white">
+              {pickLocaleText(locale, "Keluar dari sesi voice interview?", "Leave voice interview session?")}
+            </h3>
+            <p className="mt-2 text-sm text-white/70">
+              {pickLocaleText(
+                locale,
+                "Pilih `Akhiri sesi` untuk menyelesaikan interview sekarang, atau `Lanjutkan nanti` untuk kembali tanpa menyelesaikan sesi.",
+                "Choose `End session` to finish now, or `Continue later` to go back without completing the session.",
+              )}
+            </p>
+
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setShowBackExitModal(false)}
+                disabled={backExitAction !== "idle"}
+              >
+                {pickLocaleText(locale, "Tetap di sesi", "Stay in session")}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  void handleBackContinueLater();
+                }}
+                disabled={backExitAction !== "idle"}
+              >
+                {backExitAction === "pausing"
+                  ? pickLocaleText(locale, "Menyimpan progres...", "Saving progress...")
+                  : pickLocaleText(locale, "Lanjutkan nanti", "Continue later")}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  void handleBackEndSession();
+                }}
+                className="border-red-400/50 text-red-200 hover:border-red-300/70"
+                disabled={backExitAction !== "idle"}
+              >
+                {backExitAction === "ending"
+                  ? pickLocaleText(locale, "Mengakhiri sesi...", "Ending session...")
+                  : pickLocaleText(locale, "Akhiri sesi", "End session")}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {showCompletionPopup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">

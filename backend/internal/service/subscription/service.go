@@ -249,7 +249,7 @@ func (s *Service) ConsumeSession(userID, sessionID string) (*SubscriptionState, 
 			(id, user_id, session_id, usage_type, consumed_minutes, consumed_sessions, period_start, period_end, metadata)
 		 VALUES
 			($1, $2, $3::uuid, 'session_count', 0, 1, $4, $5, $6::jsonb)
-		 ON CONFLICT (user_id, session_id, usage_type, period_start)
+		 ON CONFLICT (user_id, session_id, usage_type, period_start) WHERE session_id IS NOT NULL
 		 DO NOTHING
 		 RETURNING true`,
 		uuid.NewString(),
@@ -379,7 +379,7 @@ func (s *Service) CommitVoiceUsage(userID, sessionID string, elapsedSeconds int)
 			(id, user_id, session_id, usage_type, consumed_minutes, consumed_sessions, period_start, period_end, metadata)
 		 VALUES
 			($1, $2, $3::uuid, 'voice_minutes', $4, 0, $5, $6, $7::jsonb)
-		 ON CONFLICT (user_id, session_id, usage_type, period_start)
+		 ON CONFLICT (user_id, session_id, usage_type, period_start) WHERE session_id IS NOT NULL
 		 DO NOTHING
 		 RETURNING true`,
 		uuid.NewString(),
@@ -538,6 +538,15 @@ func (s *Service) getCurrentStateFromTx(ctx context.Context, tx pgx.Tx, userID s
 }
 
 func (s *Service) insertStateDB(ctx context.Context, state *SubscriptionState) error {
+	var trialPlanID interface{}
+	trimmedTrialPlanID := strings.TrimSpace(state.TrialPlanID)
+	if trimmedTrialPlanID != "" {
+		normalizedTrialPlanID := normalizePlanID(trimmedTrialPlanID)
+		if normalizedTrialPlanID == planPro || normalizedTrialPlanID == planElite {
+			trialPlanID = normalizedTrialPlanID
+		}
+	}
+
 	_, err := s.pool.Exec(
 		ctx,
 		`INSERT INTO app_subscriptions
@@ -559,7 +568,7 @@ func (s *Service) insertStateDB(ctx context.Context, state *SubscriptionState) e
 		state.TrialStartedAt,
 		state.TrialEndsAt,
 		state.TrialUsedAt,
-		state.TrialPlanID,
+		trialPlanID,
 		state.TrialVoiceBonus,
 		state.TrialVoiceUsed,
 	)

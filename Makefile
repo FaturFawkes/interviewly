@@ -25,6 +25,7 @@ compose-build:
 	$(COMPOSE) build
 
 compose-rebuild:
+	$(MAKE) migrate-up
 	$(COMPOSE) down
 	$(COMPOSE) build
 	$(MAKE) compose-up

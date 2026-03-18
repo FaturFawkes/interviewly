@@ -97,7 +97,7 @@ func (s *Service) GenerateQuestions(
 			interviewMode,
 			interviewDifficulty,
 		); err == nil {
-			return remote, nil
+			return sanitizeGeneratedQuestionsByMode(remote, interviewMode), nil
 		}
 	}
 
@@ -162,7 +162,7 @@ func (s *Service) GenerateQuestions(
 		questions := make([]domain.GeneratedQuestion, 0, len(behavioral)+len(technical))
 		questions = append(questions, behavioral...)
 		questions = append(questions, technical...)
-		return questions, nil
+		return sanitizeGeneratedQuestionsByMode(questions, interviewMode), nil
 	}
 
 	behavioralTemplates := []string{
@@ -208,7 +208,41 @@ func (s *Service) GenerateQuestions(
 	questions = append(questions, behavioral...)
 	questions = append(questions, technical...)
 
-	return questions, nil
+	return sanitizeGeneratedQuestionsByMode(questions, interviewMode), nil
+}
+
+func sanitizeGeneratedQuestionsByMode(questions []domain.GeneratedQuestion, interviewMode domain.InterviewMode) []domain.GeneratedQuestion {
+	if domain.NormalizeInterviewMode(string(interviewMode)) != domain.InterviewModeText {
+		return questions
+	}
+
+	result := make([]domain.GeneratedQuestion, 0, len(questions))
+	for _, question := range questions {
+		cleaned := trimLeadingBracketExpressions(question.Question)
+		if strings.TrimSpace(cleaned) == "" {
+			cleaned = strings.TrimSpace(question.Question)
+		}
+
+		question.Question = cleaned
+		result = append(result, question)
+	}
+
+	return result
+}
+
+func trimLeadingBracketExpressions(value string) string {
+	cleaned := strings.TrimSpace(value)
+
+	for strings.HasPrefix(cleaned, "[") {
+		closingIndex := strings.Index(cleaned, "]")
+		if closingIndex <= 1 {
+			break
+		}
+
+		cleaned = strings.TrimSpace(cleaned[closingIndex+1:])
+	}
+
+	return cleaned
 }
 
 func (s *Service) AnalyzeAnswer(question, answer string, interviewLanguage domain.InterviewLanguage) (*domain.AnswerAnalysis, error) {

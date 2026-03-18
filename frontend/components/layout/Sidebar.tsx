@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { signOut } from "next-auth/react";
 import {
   BarChart3,
   ChevronLeft,
@@ -16,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { useLanguage } from "@/components/providers/LanguageProvider";
+import { setStoredAuthToken } from "@/lib/auth/token-provider";
 import { pickLocaleText } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -35,6 +37,26 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { locale } = useLanguage();
   const [collapsed, setCollapsed] = useState(false);
+
+  async function handleSignOut(): Promise<void> {
+    if (typeof window !== "undefined") {
+      const keysToRemove: string[] = [];
+      for (let index = 0; index < window.sessionStorage.length; index += 1) {
+        const key = window.sessionStorage.key(index);
+        if (key?.startsWith("interview-")) {
+          keysToRemove.push(key);
+        }
+      }
+
+      keysToRemove.forEach((key) => {
+        window.sessionStorage.removeItem(key);
+      });
+    }
+
+    setStoredAuthToken(null);
+    onClose();
+    await signOut({ callbackUrl: "/" });
+  }
 
   return (
     <>
@@ -107,14 +129,16 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
             {!collapsed && <span>{pickLocaleText(locale, "Pengaturan", "Settings")}</span>}
           </button>
 
-          <Link
-            href="/"
-            onClick={onClose}
+          <button
+            type="button"
+            onClick={() => {
+              void handleSignOut();
+            }}
             className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-white/50 transition-all hover:bg-red-500/5 hover:text-red-400"
           >
             <LogOut className="h-5 w-5 shrink-0" />
             {!collapsed && <span>{pickLocaleText(locale, "Keluar", "Sign Out")}</span>}
-          </Link>
+          </button>
         </div>
       </aside>
 

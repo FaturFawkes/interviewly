@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
@@ -29,6 +29,12 @@ import type { InterviewDifficulty, InterviewLanguage, InterviewMode } from "@/li
 export default function PracticePage() {
   const { locale } = useLanguage();
   const router = useRouter();
+  const [showVoiceStartModal, setShowVoiceStartModal] = useState(false);
+  const [connectingDotCount, setConnectingDotCount] = useState(1);
+  const [startInterviewMode, setStartInterviewMode] = useState<InterviewMode>("text");
+  const [showBackExitModal, setShowBackExitModal] = useState(false);
+  const [backExitAction, setBackExitAction] = useState<"idle" | "ending">("idle");
+  const allowBackNavigationRef = useRef(false);
   const {
     session,
     questions,
@@ -43,17 +49,92 @@ export default function PracticePage() {
     initializeInterview,
     submitCurrentAnswer,
     completeSession,
+    resetInterviewFlow,
     goToNextQuestion,
     sessionCompleted,
   } = useInterviewFlow();
 
   const isLastQuestion = currentIndex >= questions.length - 1;
+  const hasActiveTextSession = Boolean(
+    currentQuestion
+    && session?.interview_mode === "text"
+    && session?.status === "active"
+    && !sessionCompleted,
+  );
   const hasActiveVoiceSession = Boolean(
     currentQuestion
     && session?.interview_mode === "voice"
     && session?.status === "active"
     && !sessionCompleted,
   );
+
+  useEffect(() => {
+    if (!showVoiceStartModal) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setConnectingDotCount((prev) => (prev >= 3 ? 1 : prev + 1));
+    }, 350);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [showVoiceStartModal]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !hasActiveTextSession) {
+      return;
+    }
+
+    const guardState = { interviewBackGuard: "practice-text" };
+    window.history.pushState(guardState, "", window.location.href);
+
+    const handlePopState = () => {
+      if (allowBackNavigationRef.current) {
+        return;
+      }
+
+      setShowBackExitModal(true);
+      window.history.pushState(guardState, "", window.location.href);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [hasActiveTextSession]);
+
+  const navigateBackWithoutPrompt = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    allowBackNavigationRef.current = true;
+    setShowBackExitModal(false);
+    window.history.back();
+
+    window.setTimeout(() => {
+      allowBackNavigationRef.current = false;
+    }, 300);
+  }, []);
+
+  async function handleBackEndSession(): Promise<void> {
+    if (!session || backExitAction !== "idle") {
+      return;
+    }
+
+    setBackExitAction("ending");
+
+    const completed = sessionCompleted ? true : await completeSession();
+    if (!completed) {
+      setBackExitAction("idle");
+      return;
+    }
+
+    resetInterviewFlow();
+    navigateBackWithoutPrompt();
+  }
 
   async function handleStartInterview(payload: {
     jobDescription: string;
@@ -63,10 +144,21 @@ export default function PracticePage() {
     targetRole: string;
     targetCompany: string;
   }): Promise<boolean> {
+    const isVoiceInterview = payload.interviewMode === "voice";
+    setStartInterviewMode(payload.interviewMode);
+    setConnectingDotCount(1);
+    setShowVoiceStartModal(true);
+
     const initialized = await initializeInterview(payload);
-    if (initialized && payload.interviewMode === "voice") {
+    if (initialized && isVoiceInterview) {
       router.push("/practice/voice/call");
     }
+
+    if (!initialized || !isVoiceInterview) {
+      setShowVoiceStartModal(false);
+      setConnectingDotCount(1);
+    }
+
     return initialized;
   }
 
@@ -228,6 +320,85 @@ export default function PracticePage() {
               </div>
             </div>
           </>
+        )}
+
+        {showBackExitModal && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/75 px-4 backdrop-blur-sm">
+            <Card className="w-full max-w-md border border-white/15 bg-[rgba(10,15,26,0.96)] p-6">
+              <h3 className="text-base font-semibold text-white">
+                {pickLocaleText(locale, "Keluar dari sesi interview?", "Leave interview session?")}
+              </h3>
+              <p className="mt-2 text-sm text-white/70">
+                {pickLocaleText(
+                  locale,
+                  "Pilih `Akhiri sesi` untuk menutup interview sekarang, atau `Lanjutkan nanti` untuk kembali tanpa menyelesaikan sesi.",
+                  "Choose `End session` to finish now, or `Continue later` to go back without completing the session.",
+                )}
+              </p>
+
+              <div className="mt-5 flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setShowBackExitModal(false)}
+                  disabled={backExitAction !== "idle"}
+                >
+                  {pickLocaleText(locale, "Tetap di sesi", "Stay in session")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={navigateBackWithoutPrompt}
+                  disabled={backExitAction !== "idle"}
+                >
+                  {pickLocaleText(locale, "Lanjutkan nanti", "Continue later")}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handleBackEndSession()}
+                  className="border-red-400/50 text-red-200 hover:border-red-300/70"
+                  disabled={backExitAction !== "idle"}
+                >
+                  {backExitAction === "ending"
+                    ? pickLocaleText(locale, "Mengakhiri sesi...", "Ending session...")
+                    : pickLocaleText(locale, "Akhiri sesi", "End session")}
+                </Button>
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {showVoiceStartModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4 backdrop-blur-sm transition-opacity duration-300 ease-out opacity-100"
+          >
+            <div
+              className="relative w-full max-w-md overflow-hidden rounded-[22px] border border-white/10 bg-slate-900/95 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.45)] transition-all duration-300 ease-out translate-y-0 scale-100 opacity-100"
+            >
+              <div aria-hidden className="pointer-events-none absolute -top-16 left-1/2 h-40 w-40 -translate-x-1/2 rounded-full bg-cyan-400/20 blur-3xl animate-pulse" />
+              <div className="relative mx-auto mb-4 flex h-20 w-20 items-center justify-center">
+                <div className="absolute inset-0 rounded-full border border-cyan-100/20 animate-pulse" />
+                <div className="absolute inset-2 rounded-full border border-cyan-200/20" />
+                <div className="h-10 w-10 animate-spin rounded-full border-[3px] border-cyan-100/25 border-t-cyan-100 drop-shadow-[0_0_18px_rgba(103,232,249,0.6)]" />
+              </div>
+              <h3 className="relative text-center text-base font-semibold text-white">
+                {startInterviewMode === "voice"
+                  ? pickLocaleText(locale, "Menyiapkan interview suara", "Preparing voice interview")
+                  : pickLocaleText(locale, "Menyiapkan interview teks", "Preparing text interview")}
+              </h3>
+              <p className="relative mt-2 text-center text-sm text-white/60">
+                {startInterviewMode === "voice"
+                  ? pickLocaleText(locale, "Mohon tunggu sebentar, kami sedang menghubungkan Anda ke interviewer AI.", "Please wait a moment while we connect you to the AI interviewer.")
+                  : pickLocaleText(locale, "Mohon tunggu sebentar, kami sedang menyiapkan pertanyaan interview untuk Anda.", "Please wait a moment while we prepare interview questions for you.")}
+              </p>
+              <p className="relative mt-1 text-center text-xs font-medium tracking-wide text-cyan-200/90">
+                {startInterviewMode === "voice"
+                  ? pickLocaleText(locale, "Menghubungkan", "Connecting")
+                  : pickLocaleText(locale, "Menyiapkan", "Preparing")}
+                <span className="inline-block min-w-6 text-left">{".".repeat(connectingDotCount)}</span>
+              </p>
+            </div>
+          </div>
         )}
       </div>
     </AppShell>

@@ -263,9 +263,11 @@ func (r *interviewRepository) CreatePracticeSession(
 			session.Score,
 			session.CreatedAt,
 		)
-		if err == nil {
-			return session, nil
+		if err != nil {
+			return nil, err
 		}
+
+		return session, nil
 	}
 
 	r.mu.Lock()
