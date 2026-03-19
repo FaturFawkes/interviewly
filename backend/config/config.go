@@ -37,6 +37,8 @@ type Config struct {
 	ElevenLabsSTTModel            string
 	ElevenLabsAgentID             string
 	ElevenLabsAgentBranchID       string
+	ElevenLabsReviewAgentID       string
+	ElevenLabsReviewAgentBranchID string
 	MinIOEndpoint                 string
 	MinIOAccessKey                string
 	MinIOSecretKey                string
@@ -84,6 +86,8 @@ func Load() *Config {
 		ElevenLabsSTTModel:            getEnv("ELEVENLABS_STT_MODEL", "scribe_v1"),
 		ElevenLabsAgentID:             getEnv("ELEVENLABS_AGENT_ID", ""),
 		ElevenLabsAgentBranchID:       getEnv("ELEVENLABS_AGENT_BRANCH_ID", ""),
+		ElevenLabsReviewAgentID:       getEnv("ELEVENLABS_REVIEW_AGENT_ID", ""),
+		ElevenLabsReviewAgentBranchID: getEnv("ELEVENLABS_REVIEW_AGENT_BRANCH_ID", ""),
 		MinIOEndpoint:                 getEnv("MINIO_ENDPOINT", ""),
 		MinIOAccessKey:                getEnv("MINIO_ACCESS_KEY", ""),
 		MinIOSecretKey:                getEnv("MINIO_SECRET_KEY", ""),

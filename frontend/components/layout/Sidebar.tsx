@@ -6,6 +6,7 @@ import { useState } from "react";
 import { signOut } from "next-auth/react";
 import {
   BarChart3,
+  Brain,
   ChevronLeft,
   LayoutDashboard,
   LogOut,
@@ -25,6 +26,7 @@ const navItems = [
   { href: "/dashboard", labelID: "Dasbor", labelEN: "Dashboard", icon: LayoutDashboard },
   { href: "/upload", labelID: "Unggah Resume (CV)", labelEN: "Upload Resume (CV)", icon: Upload },
   { href: "/practice", labelID: "Latihan", labelEN: "Practice", icon: MessageSquare },
+  { href: "/review", labelID: "Review Coach", labelEN: "Review Coach", icon: Brain },
   { href: "/analytics", labelID: "Analisis Interview", labelEN: "Interview Analytics", icon: BarChart3 },
 ];
 

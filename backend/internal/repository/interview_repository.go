@@ -2,7 +2,10 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,28 +16,34 @@ import (
 )
 
 type interviewRepository struct {
-	pool       *pgxpool.Pool
-	mu         sync.RWMutex
-	parsedJobs map[string]*domain.ParsedJobDescription
-	resumes    map[string]*domain.ResumeRecord
-	questions  map[string]domain.StoredQuestion
-	sessions   map[string]domain.PracticeSession
-	answers    map[string]domain.SessionAnswer
-	feedbacks  map[string]domain.FeedbackRecord
-	progress   map[string]domain.ProgressMetrics
+	pool             *pgxpool.Pool
+	mu               sync.RWMutex
+	parsedJobs       map[string]*domain.ParsedJobDescription
+	resumes          map[string]*domain.ResumeRecord
+	questions        map[string]domain.StoredQuestion
+	sessions         map[string]domain.PracticeSession
+	answers          map[string]domain.SessionAnswer
+	feedbacks        map[string]domain.FeedbackRecord
+	progress         map[string]domain.ProgressMetrics
+	reviewSessions   map[string]domain.ReviewSession
+	coachingMemory   map[string]domain.CoachingMemory
+	progressTracking map[string][]domain.ProgressTrackingPoint
 }
 
 // NewInterviewRepository creates interview repository with postgres support and in-memory fallback.
 func NewInterviewRepository(pool *pgxpool.Pool) domain.InterviewRepository {
 	return &interviewRepository{
-		pool:       pool,
-		parsedJobs: make(map[string]*domain.ParsedJobDescription),
-		resumes:    make(map[string]*domain.ResumeRecord),
-		questions:  make(map[string]domain.StoredQuestion),
-		sessions:   make(map[string]domain.PracticeSession),
-		answers:    make(map[string]domain.SessionAnswer),
-		feedbacks:  make(map[string]domain.FeedbackRecord),
-		progress:   make(map[string]domain.ProgressMetrics),
+		pool:             pool,
+		parsedJobs:       make(map[string]*domain.ParsedJobDescription),
+		resumes:          make(map[string]*domain.ResumeRecord),
+		questions:        make(map[string]domain.StoredQuestion),
+		sessions:         make(map[string]domain.PracticeSession),
+		answers:          make(map[string]domain.SessionAnswer),
+		feedbacks:        make(map[string]domain.FeedbackRecord),
+		progress:         make(map[string]domain.ProgressMetrics),
+		reviewSessions:   make(map[string]domain.ReviewSession),
+		coachingMemory:   make(map[string]domain.CoachingMemory),
+		progressTracking: make(map[string][]domain.ProgressTrackingPoint),
 	}
 }
 
@@ -622,6 +631,560 @@ func (r *interviewRepository) GetProgressMetrics(userID string) (*domain.Progres
 
 	copy := metrics
 	return &copy, nil
+}
+
+func (r *interviewRepository) CreateReviewSession(userID string, input domain.ReviewStartInput) (*domain.ReviewSession, error) {
+	now := time.Now().UTC()
+	sessionType := strings.TrimSpace(strings.ToLower(input.SessionType))
+	if sessionType == "" {
+		sessionType = domain.ReviewSessionTypeStandard
+	}
+	inputMode := strings.TrimSpace(strings.ToLower(input.InputMode))
+	if inputMode == "" {
+		inputMode = string(domain.InterviewModeText)
+	}
+
+	session := &domain.ReviewSession{
+		ID:             uuid.NewString(),
+		UserID:         userID,
+		SessionType:    sessionType,
+		InputMode:      inputMode,
+		InputText:      strings.TrimSpace(input.InputText),
+		VoiceURL:       strings.TrimSpace(input.VoiceURL),
+		TranscriptText: strings.TrimSpace(input.TranscriptText),
+		RoleTarget:     strings.TrimSpace(input.TargetRole),
+		CompanyTarget:  strings.TrimSpace(input.TargetCompany),
+		Status:         domain.SessionStatusActive,
+		Feedback: domain.ReviewAIFeedback{
+			Strengths:   []string{},
+			Weaknesses:  []string{},
+			Suggestions: []string{},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if r.pool != nil {
+		payload, marshalErr := json.Marshal(session.Feedback)
+		if marshalErr != nil {
+			return nil, marshalErr
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := r.pool.Exec(
+			ctx,
+			`INSERT INTO app_review_sessions
+				(id, user_id, session_type, input_mode, input_text, voice_url, transcript_text, role_target, company_target, status, ai_feedback, score, communication_score, structure_score, confidence_score, created_at, updated_at)
+			 VALUES
+				($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15, $16, $17)`,
+			session.ID,
+			session.UserID,
+			session.SessionType,
+			session.InputMode,
+			session.InputText,
+			session.VoiceURL,
+			session.TranscriptText,
+			session.RoleTarget,
+			session.CompanyTarget,
+			session.Status,
+			string(payload),
+			session.Feedback.Score,
+			session.Feedback.Communication,
+			session.Feedback.StructureSTAR,
+			session.Feedback.Confidence,
+			session.CreatedAt,
+			session.UpdatedAt,
+		)
+		if err == nil {
+			return session, nil
+		}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reviewSessions[session.ID] = *session
+	return session, nil
+}
+
+func (r *interviewRepository) GetReviewSession(userID, sessionID string) (*domain.ReviewSession, error) {
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var session domain.ReviewSession
+		var feedbackJSON []byte
+		err := r.pool.QueryRow(
+			ctx,
+			`SELECT id, user_id, session_type, input_mode, input_text, voice_url, transcript_text, role_target, company_target, status,
+					ai_feedback, score, communication_score, structure_score, confidence_score, created_at, updated_at, completed_at
+			   FROM app_review_sessions
+			  WHERE id = $1 AND user_id = $2`,
+			sessionID,
+			userID,
+		).Scan(
+			&session.ID,
+			&session.UserID,
+			&session.SessionType,
+			&session.InputMode,
+			&session.InputText,
+			&session.VoiceURL,
+			&session.TranscriptText,
+			&session.RoleTarget,
+			&session.CompanyTarget,
+			&session.Status,
+			&feedbackJSON,
+			&session.Feedback.Score,
+			&session.Feedback.Communication,
+			&session.Feedback.StructureSTAR,
+			&session.Feedback.Confidence,
+			&session.CreatedAt,
+			&session.UpdatedAt,
+			&session.CompletedAt,
+		)
+		if err == nil {
+			if len(feedbackJSON) > 0 {
+				_ = json.Unmarshal(feedbackJSON, &session.Feedback)
+			}
+			return &session, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	session, exists := r.reviewSessions[sessionID]
+	if !exists || session.UserID != userID {
+		return nil, errors.New("review session not found")
+	}
+	copy := session
+	return &copy, nil
+}
+
+func (r *interviewRepository) UpdateReviewSessionFeedback(userID, sessionID string, feedback domain.ReviewAIFeedback, appendInput string) (*domain.ReviewSession, error) {
+	now := time.Now().UTC()
+	feedback.Score = clampReviewScore(feedback.Score)
+	feedback.Communication = clampReviewScore(feedback.Communication)
+	feedback.StructureSTAR = clampReviewScore(feedback.StructureSTAR)
+	feedback.Confidence = clampReviewScore(feedback.Confidence)
+
+	if r.pool != nil {
+		payload, marshalErr := json.Marshal(feedback)
+		if marshalErr != nil {
+			return nil, marshalErr
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var session domain.ReviewSession
+		var feedbackJSON []byte
+		err := r.pool.QueryRow(
+			ctx,
+			`UPDATE app_review_sessions
+				SET ai_feedback = $3::jsonb,
+					score = $4,
+					communication_score = $5,
+					structure_score = $6,
+					confidence_score = $7,
+					transcript_text = CASE WHEN $8 = '' THEN transcript_text ELSE CONCAT_WS(E'\n', transcript_text, $8) END,
+					updated_at = $9
+			  WHERE id = $1 AND user_id = $2
+			  RETURNING id, user_id, session_type, input_mode, input_text, voice_url, transcript_text, role_target, company_target, status,
+						ai_feedback, score, communication_score, structure_score, confidence_score, created_at, updated_at, completed_at`,
+			sessionID,
+			userID,
+			string(payload),
+			feedback.Score,
+			feedback.Communication,
+			feedback.StructureSTAR,
+			feedback.Confidence,
+			strings.TrimSpace(appendInput),
+			now,
+		).Scan(
+			&session.ID,
+			&session.UserID,
+			&session.SessionType,
+			&session.InputMode,
+			&session.InputText,
+			&session.VoiceURL,
+			&session.TranscriptText,
+			&session.RoleTarget,
+			&session.CompanyTarget,
+			&session.Status,
+			&feedbackJSON,
+			&session.Feedback.Score,
+			&session.Feedback.Communication,
+			&session.Feedback.StructureSTAR,
+			&session.Feedback.Confidence,
+			&session.CreatedAt,
+			&session.UpdatedAt,
+			&session.CompletedAt,
+		)
+		if err == nil {
+			if len(feedbackJSON) > 0 {
+				_ = json.Unmarshal(feedbackJSON, &session.Feedback)
+			}
+			return &session, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	session, exists := r.reviewSessions[sessionID]
+	if !exists || session.UserID != userID {
+		return nil, errors.New("review session not found")
+	}
+	session.Feedback = feedback
+	if trimmedInput := strings.TrimSpace(appendInput); trimmedInput != "" {
+		session.TranscriptText = strings.TrimSpace(strings.Join([]string{session.TranscriptText, trimmedInput}, "\n"))
+	}
+	session.UpdatedAt = now
+	r.reviewSessions[sessionID] = session
+	copy := session
+	return &copy, nil
+}
+
+func (r *interviewRepository) CompleteReviewSession(userID, sessionID string, plan *domain.ImprovementPlan, summary string) (*domain.ReviewSession, error) {
+	now := time.Now().UTC()
+
+	session, err := r.GetReviewSession(userID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	if plan != nil {
+		session.ImprovementPlan = plan
+	}
+	if strings.TrimSpace(summary) != "" {
+		session.Feedback.Insight = strings.TrimSpace(summary)
+	}
+	session.Status = domain.SessionStatusCompleted
+	session.CompletedAt = &now
+	session.UpdatedAt = now
+
+	if r.pool != nil {
+		payload, marshalErr := json.Marshal(session.Feedback)
+		if marshalErr != nil {
+			return nil, marshalErr
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := r.pool.Exec(
+			ctx,
+			`UPDATE app_review_sessions
+				SET status = $3,
+					ai_feedback = $4::jsonb,
+					score = $5,
+					communication_score = $6,
+					structure_score = $7,
+					confidence_score = $8,
+					completed_at = $9,
+					updated_at = $10
+			  WHERE id = $1 AND user_id = $2`,
+			sessionID,
+			userID,
+			session.Status,
+			string(payload),
+			session.Feedback.Score,
+			session.Feedback.Communication,
+			session.Feedback.StructureSTAR,
+			session.Feedback.Confidence,
+			now,
+			now,
+		)
+		if err == nil {
+			return session, nil
+		}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reviewSessions[sessionID] = *session
+	return session, nil
+}
+
+func (r *interviewRepository) ListRecentReviewSessions(userID string, limit int) ([]domain.ReviewSession, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		rows, err := r.pool.Query(
+			ctx,
+			`SELECT id, user_id, session_type, input_mode, input_text, voice_url, transcript_text, role_target, company_target, status,
+					ai_feedback, score, communication_score, structure_score, confidence_score, created_at, updated_at, completed_at
+			   FROM app_review_sessions
+			  WHERE user_id = $1
+			  ORDER BY created_at DESC
+			  LIMIT $2`,
+			userID,
+			limit,
+		)
+		if err == nil {
+			defer rows.Close()
+			result := make([]domain.ReviewSession, 0)
+			for rows.Next() {
+				var session domain.ReviewSession
+				var feedbackJSON []byte
+				if scanErr := rows.Scan(
+					&session.ID,
+					&session.UserID,
+					&session.SessionType,
+					&session.InputMode,
+					&session.InputText,
+					&session.VoiceURL,
+					&session.TranscriptText,
+					&session.RoleTarget,
+					&session.CompanyTarget,
+					&session.Status,
+					&feedbackJSON,
+					&session.Feedback.Score,
+					&session.Feedback.Communication,
+					&session.Feedback.StructureSTAR,
+					&session.Feedback.Confidence,
+					&session.CreatedAt,
+					&session.UpdatedAt,
+					&session.CompletedAt,
+				); scanErr == nil {
+					if len(feedbackJSON) > 0 {
+						_ = json.Unmarshal(feedbackJSON, &session.Feedback)
+					}
+					result = append(result, session)
+				}
+			}
+			return result, nil
+		}
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]domain.ReviewSession, 0)
+	for _, session := range r.reviewSessions {
+		if session.UserID == userID {
+			result = append(result, session)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CreatedAt.After(result[j].CreatedAt)
+	})
+	if len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
+func (r *interviewRepository) GetCoachingMemory(userID string) (*domain.CoachingMemory, error) {
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		memory := &domain.CoachingMemory{}
+		err := r.pool.QueryRow(
+			ctx,
+			`SELECT user_id, target_role, strengths, weaknesses, preferred_language, last_summary, focus_areas, next_actions, updated_at
+			   FROM app_coaching_memory
+			  WHERE user_id = $1`,
+			userID,
+		).Scan(
+			&memory.UserID,
+			&memory.TargetRole,
+			&memory.Strengths,
+			&memory.Weaknesses,
+			&memory.PreferredLanguage,
+			&memory.LastSummary,
+			&memory.FocusAreas,
+			&memory.NextActions,
+			&memory.UpdatedAt,
+		)
+		if err == nil {
+			return memory, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	memory, exists := r.coachingMemory[userID]
+	if exists {
+		copy := memory
+		return &copy, nil
+	}
+
+	return &domain.CoachingMemory{
+		UserID:            userID,
+		Strengths:         []string{},
+		Weaknesses:        []string{},
+		PreferredLanguage: "en",
+		FocusAreas:        []string{},
+		NextActions:       []string{},
+		UpdatedAt:         time.Now().UTC(),
+	}, nil
+}
+
+func (r *interviewRepository) UpsertCoachingMemory(memory domain.CoachingMemory) (*domain.CoachingMemory, error) {
+	memory.UpdatedAt = time.Now().UTC()
+
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := r.pool.Exec(
+			ctx,
+			`INSERT INTO app_coaching_memory
+				(user_id, target_role, strengths, weaknesses, preferred_language, last_summary, focus_areas, next_actions, updated_at)
+			 VALUES
+				($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			 ON CONFLICT (user_id)
+			 DO UPDATE SET
+				target_role = EXCLUDED.target_role,
+				strengths = EXCLUDED.strengths,
+				weaknesses = EXCLUDED.weaknesses,
+				preferred_language = EXCLUDED.preferred_language,
+				last_summary = EXCLUDED.last_summary,
+				focus_areas = EXCLUDED.focus_areas,
+				next_actions = EXCLUDED.next_actions,
+				updated_at = EXCLUDED.updated_at`,
+			memory.UserID,
+			memory.TargetRole,
+			memory.Strengths,
+			memory.Weaknesses,
+			memory.PreferredLanguage,
+			memory.LastSummary,
+			memory.FocusAreas,
+			memory.NextActions,
+			memory.UpdatedAt,
+		)
+		if err == nil {
+			return &memory, nil
+		}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.coachingMemory[memory.UserID] = memory
+	copy := memory
+	return &copy, nil
+}
+
+func (r *interviewRepository) SaveProgressTrackingPoint(userID, reviewSessionID string, point domain.ProgressTrackingPoint) (*domain.ProgressTrackingPoint, error) {
+	point.ReviewSessionID = reviewSessionID
+	if point.CreatedAt.IsZero() {
+		point.CreatedAt = time.Now().UTC()
+	}
+	point.Communication = clampReviewScore(point.Communication)
+	point.StructureSTAR = clampReviewScore(point.StructureSTAR)
+	point.Confidence = clampReviewScore(point.Confidence)
+	point.OverallScore = clampReviewScore(point.OverallScore)
+
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := r.pool.Exec(
+			ctx,
+			`INSERT INTO app_progress_tracking
+				(id, user_id, review_session_id, communication_score, structure_score, confidence_score, overall_score, notes, created_at)
+			 VALUES
+				($1, $2, $3::uuid, $4, $5, $6, $7, $8, $9)`,
+			uuid.NewString(),
+			userID,
+			reviewSessionID,
+			point.Communication,
+			point.StructureSTAR,
+			point.Confidence,
+			point.OverallScore,
+			point.Notes,
+			point.CreatedAt,
+		)
+		if err == nil {
+			return &point, nil
+		}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.progressTracking[userID] = append(r.progressTracking[userID], point)
+	copy := point
+	return &copy, nil
+}
+
+func (r *interviewRepository) ListProgressTracking(userID string, limit int) ([]domain.ProgressTrackingPoint, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		rows, err := r.pool.Query(
+			ctx,
+			`SELECT review_session_id, communication_score, structure_score, confidence_score, overall_score, notes, created_at
+			   FROM app_progress_tracking
+			  WHERE user_id = $1
+			  ORDER BY created_at DESC
+			  LIMIT $2`,
+			userID,
+			limit,
+		)
+		if err == nil {
+			defer rows.Close()
+			result := make([]domain.ProgressTrackingPoint, 0)
+			for rows.Next() {
+				var point domain.ProgressTrackingPoint
+				if scanErr := rows.Scan(
+					&point.ReviewSessionID,
+					&point.Communication,
+					&point.StructureSTAR,
+					&point.Confidence,
+					&point.OverallScore,
+					&point.Notes,
+					&point.CreatedAt,
+				); scanErr == nil {
+					result = append(result, point)
+				}
+			}
+			return result, nil
+		}
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	points := append([]domain.ProgressTrackingPoint{}, r.progressTracking[userID]...)
+	sort.Slice(points, func(i, j int) bool {
+		return points[i].CreatedAt.After(points[j].CreatedAt)
+	})
+	if len(points) > limit {
+		points = points[:limit]
+	}
+	return points, nil
+}
+
+func clampReviewScore(value int) int {
+	if value < 0 {
+		return 0
+	}
+	if value > 100 {
+		return 100
+	}
+	return value
 }
 
 func (r *interviewRepository) validateSessionCreationReferences(userID, resumeID, jobParseID string, questionIDs []string) error {

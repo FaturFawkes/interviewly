@@ -86,18 +86,20 @@ type Service struct {
 	pool  *pgxpool.Pool
 	cache *cache.RedisCache
 
-	mu            sync.Mutex
-	memorySubs    map[string]*SubscriptionState
-	planCatalog   map[string]PlanQuota
-	stateCacheTTL time.Duration
+	mu                   sync.Mutex
+	memorySubs           map[string]*SubscriptionState
+	memoryReviewSessions map[string]int
+	planCatalog          map[string]PlanQuota
+	stateCacheTTL        time.Duration
 }
 
 func NewService(cfg *config.Config, pool *pgxpool.Pool, redisCache *cache.RedisCache) *Service {
 	_ = cfg
 	return &Service{
-		pool:       pool,
-		cache:      redisCache,
-		memorySubs: map[string]*SubscriptionState{},
+		pool:                 pool,
+		cache:                redisCache,
+		memorySubs:           map[string]*SubscriptionState{},
+		memoryReviewSessions: map[string]int{},
 		planCatalog: map[string]PlanQuota{
 			planFree: {
 				PlanID:            planFree,
@@ -423,6 +425,130 @@ func (s *Service) CommitVoiceUsage(userID, sessionID string, elapsedSeconds int)
 
 	s.cacheState(trimmedUserID, updated)
 	return updated, nil
+}
+
+func (s *Service) CanStartReviewSession(userID, inputMode string) (*SubscriptionState, error) {
+	state, err := s.EnsureActiveSubscription(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(inputMode))
+	if mode == "" {
+		mode = "text"
+	}
+
+	if normalizePlanID(state.PlanID) == planFree && mode == "voice" {
+		return nil, errors.New("voice coaching is available for Pro and Elite plans")
+	}
+
+	if normalizePlanID(state.PlanID) != planFree {
+		return state, nil
+	}
+
+	usedCount, err := s.countReviewSessionsUsed(state.UserID, state.PeriodStart, state.PeriodEnd)
+	if err != nil {
+		return nil, err
+	}
+	if usedCount >= 2 {
+		return nil, errors.New("weekly review session limit reached for free plan")
+	}
+
+	return state, nil
+}
+
+func (s *Service) ConsumeReviewSession(userID, sessionID, inputMode string) (*SubscriptionState, error) {
+	trimmedUserID := strings.TrimSpace(userID)
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedUserID == "" {
+		return nil, errors.New("user id is required")
+	}
+	if trimmedSessionID == "" {
+		return nil, errors.New("session id is required")
+	}
+
+	state, err := s.CanStartReviewSession(trimmedUserID, inputMode)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.pool == nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.memoryReviewSessions[trimmedUserID]++
+		return state, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err = s.pool.Exec(
+		ctx,
+		`INSERT INTO app_usage_tracking
+			(id, user_id, session_id, usage_type, consumed_minutes, consumed_sessions, period_start, period_end, metadata)
+		 VALUES
+			($1, $2, $3::uuid, 'review_count', 0, 1, $4, $5, $6::jsonb)
+		 ON CONFLICT (user_id, session_id, usage_type, period_start) WHERE session_id IS NOT NULL
+		 DO NOTHING`,
+		uuid.NewString(),
+		trimmedUserID,
+		trimmedSessionID,
+		state.PeriodStart,
+		state.PeriodEnd,
+		fmt.Sprintf(`{"mode":"%s"}`, strings.ToLower(strings.TrimSpace(inputMode))),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return state, nil
+}
+
+func (s *Service) CheckReviewVoiceQuota(userID string) (*VoiceQuotaCheck, error) {
+	state, err := s.EnsureActiveSubscription(userID)
+	if err != nil {
+		return nil, err
+	}
+	if normalizePlanID(state.PlanID) == planFree {
+		return nil, errors.New("voice coaching is available for Pro and Elite plans")
+	}
+
+	return s.CheckVoiceQuota(userID)
+}
+
+func (s *Service) countReviewSessionsUsed(userID string, periodStart, periodEnd time.Time) (int, error) {
+	if s.pool == nil {
+		count := s.memoryReviewSessions[userID]
+		if count < 0 {
+			count = 0
+		}
+		return count, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var total int
+	err := s.pool.QueryRow(
+		ctx,
+		`SELECT COALESCE(SUM(consumed_sessions), 0)
+		   FROM app_usage_tracking
+		  WHERE user_id = $1
+		    AND usage_type = 'review_count'
+		    AND period_start = $2
+		    AND period_end = $3`,
+		userID,
+		periodStart,
+		periodEnd,
+	).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+
+	if total < 0 {
+		total = 0
+	}
+	return total, nil
 }
 
 func (s *Service) newState(userID, planID string, now time.Time) *SubscriptionState {

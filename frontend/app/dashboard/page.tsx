@@ -43,7 +43,7 @@ export default function DashboardPage() {
       try {
         const [progress, subscriptionStatus] = await Promise.all([api.getProgress(), api.getSubscriptionStatus()]);
         setState({
-          sessionsCompleted: progress.sessions_completed,
+          sessionsCompleted: progress.interview_progress.sessions_completed,
           currentPlanID: subscriptionStatus.plan_id,
           trialActive: subscriptionStatus.trial_active,
           trialEndsAt: subscriptionStatus.trial_ends_at,
@@ -176,6 +176,10 @@ export default function DashboardPage() {
               </Link>
               <Link href="/analytics" className="flex items-center justify-between rounded-[14px] border border-cyan-300/20 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-100 hover:bg-cyan-400/15">
                 <span>{pickLocaleText(locale, "Lihat analisis hasil interview", "View interview result analysis")}</span>
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+              <Link href="/review" className="flex items-center justify-between rounded-[14px] border border-purple-300/20 bg-purple-400/10 px-4 py-3 text-sm text-purple-100 hover:bg-purple-400/15">
+                <span>{pickLocaleText(locale, "Buka AI Career Coach (Review)", "Open AI Career Coach (Review)")}</span>
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </div>

@@ -54,6 +54,7 @@ func main() {
 	sessionHandler := handler.NewSessionHandler(interviewUC, subscriptionService)
 	feedbackHandler := handler.NewFeedbackHandler(interviewUC)
 	progressHandler := handler.NewProgressHandler(interviewUC)
+	reviewHandler := handler.NewReviewHandler(interviewUC, subscriptionService)
 	meHandler := handler.NewMeHandler()
 	authRepo := repository.NewAuthRepository(postgresPool)
 	otpSender := notification.NewRegistrationOTPSender(cfg)
@@ -62,7 +63,7 @@ func main() {
 	authMiddleware := middleware.AuthMiddleware(cfg)
 
 	// Setup router
-	r := router.Setup(healthHandler, authHandler, meHandler, jobHandler, resumeHandler, questionHandler, voiceHandler, paymentHandler, sessionHandler, subscriptionHandler, feedbackHandler, progressHandler, authMiddleware)
+	r := router.Setup(healthHandler, authHandler, meHandler, jobHandler, resumeHandler, questionHandler, voiceHandler, paymentHandler, sessionHandler, subscriptionHandler, feedbackHandler, progressHandler, reviewHandler, authMiddleware)
 
 	addr := fmt.Sprintf(":%s", cfg.ServerPort)
 	log.Printf("Server starting on %s (env: %s)", addr, cfg.Env)

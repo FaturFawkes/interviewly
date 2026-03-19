@@ -153,6 +153,65 @@ func (h *VoiceHandler) CreateAgentSession(c *gin.Context) {
 	})
 }
 
+func (h *VoiceHandler) CreateReviewAgentSession(c *gin.Context) {
+	if h.service == nil || !h.service.ReviewAgentIsReady() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "elevenlabs review agent is not configured"})
+		return
+	}
+	if h.subscriptionService == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "subscription service is not configured"})
+		return
+	}
+
+	userIDValue, exists := c.Get(middleware.UserIDContextKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	userID, ok := userIDValue.(string)
+	if !ok || strings.TrimSpace(userID) == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user context"})
+		return
+	}
+
+	req := voiceAgentSessionRequest{}
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	voiceQuota, err := h.subscriptionService.CheckReviewVoiceQuota(userID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if !voiceQuota.CanStart {
+		c.JSON(http.StatusPaymentRequired, gin.H{"error": voiceQuota.Message})
+		return
+	}
+
+	result, err := h.service.GetReviewAgentSignedURL(req.IncludeConversationID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"signed_url":                result.SignedURL,
+		"conversation_id":           result.ConversationID,
+		"total_voice_minutes":       voiceQuota.TotalVoiceMinutes,
+		"used_voice_minutes":        voiceQuota.UsedVoiceMinutes,
+		"remaining_voice_minutes":   voiceQuota.RemainingVoiceMinutes,
+		"allowed_call_seconds":      voiceQuota.AllowedCallSeconds,
+		"warning_threshold_reached": voiceQuota.WarningThresholdReached,
+		"voice_quota_message":       voiceQuota.Message,
+	})
+}
+
 func (h *VoiceHandler) CommitVoiceUsage(c *gin.Context) {
 	if h.subscriptionService == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "subscription service is not configured"})
