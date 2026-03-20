@@ -55,6 +55,7 @@ func main() {
 	sessionHandler := handler.NewSessionHandler(interviewUC, subscriptionService)
 	feedbackHandler := handler.NewFeedbackHandler(interviewUC)
 	progressHandler := handler.NewProgressHandler(interviewUC)
+	reviewHandler := handler.NewReviewHandler(interviewUC, subscriptionService)
 	meHandler := handler.NewMeHandler()
 	authRepo := repository.NewAuthRepository(postgresPool)
 	otpSender := notification.NewRegistrationOTPSender(cfg)
@@ -64,7 +65,23 @@ func main() {
 	rateLimitMiddleware := middleware.RateLimitMiddleware(redisCache, cfg.SubscriptionRateLimitPerMinute, time.Minute)
 
 	// Setup router
-	r := router.Setup(healthHandler, authHandler, meHandler, jobHandler, resumeHandler, questionHandler, voiceHandler, paymentHandler, sessionHandler, subscriptionHandler, feedbackHandler, progressHandler, authMiddleware, rateLimitMiddleware)
+	r := router.Setup(
+		healthHandler,
+		authHandler,
+		meHandler,
+		jobHandler,
+		resumeHandler,
+		questionHandler,
+		voiceHandler,
+		paymentHandler,
+		sessionHandler,
+		subscriptionHandler,
+		feedbackHandler,
+		progressHandler,
+		reviewHandler,
+		authMiddleware,
+		rateLimitMiddleware,
+	)
 	startIdleSessionSweeper(cfg, interviewUC)
 
 	addr := fmt.Sprintf(":%s", cfg.ServerPort)

@@ -191,6 +191,103 @@ export type ProgressMetrics = {
   updated_at: string;
 };
 
+export type ReviewFeedback = {
+  score: number;
+  communication: number;
+  structure_star: number;
+  confidence: number;
+  strengths: string[];
+  weaknesses: string[];
+  suggestions: string[];
+  better_answer: string;
+  insight: string;
+  follow_up_question: string;
+  recovery_simulation?: string;
+};
+
+export type ReviewSession = {
+  id: string;
+  user_id: string;
+  session_type: "review" | "recovery";
+  input_mode: InterviewMode;
+  input_text?: string;
+  voice_url?: string;
+  transcript_text?: string;
+  role_target?: string;
+  company_target?: string;
+  status: "active" | "completed" | "abandoned";
+  feedback: ReviewFeedback;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+};
+
+export type ImprovementPlan = {
+  focus_areas: string[];
+  practice_plan: string[];
+  weekly_target: string;
+  next_session_focus: string;
+};
+
+export type ReviewStartPayload = {
+  session_type?: "review" | "recovery";
+  input_mode?: InterviewMode;
+  input_text?: string;
+  voice_url?: string;
+  transcript_text?: string;
+  interview_prompt?: string;
+  target_role?: string;
+  target_company?: string;
+};
+
+export type ReviewRespondPayload = {
+  session_id: string;
+  input_text?: string;
+  voice_url?: string;
+  transcript_text?: string;
+  interview_prompt?: string;
+};
+
+export type ReviewResponse = {
+  session: ReviewSession;
+  feedback: ReviewFeedback;
+  score: number;
+  improvement_tips: string[];
+};
+
+export type ReviewEndResponse = {
+  session_id: string;
+  feedback: ReviewFeedback;
+  score: number;
+  improvement_tips: string[];
+  improvement_plan: ImprovementPlan;
+  coaching_summary: string;
+};
+
+export type ReviewProgressPoint = {
+  review_session_id?: string;
+  communication: number;
+  structure_star: number;
+  confidence: number;
+  overall_score: number;
+  notes?: string;
+  created_at: string;
+};
+
+export type ReviewProgress = {
+  user_id: string;
+  communication_trend: ReviewProgressPoint[];
+  structure_trend: ReviewProgressPoint[];
+  confidence_trend: ReviewProgressPoint[];
+  latest_overall_score: number;
+  average_overall_score: number;
+};
+
+export type ProgressResponse = {
+  interview_progress: ProgressMetrics;
+  review_progress: ReviewProgress;
+};
+
 export type AnalyticsOverview = {
   average_score: number;
   sessions_completed: number;

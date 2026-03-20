@@ -61,13 +61,14 @@ export default function ProgressPage() {
     async function load() {
       try {
         const [progress, history] = await Promise.all([api.getProgress(), api.getSessionHistory()]);
+        const interviewProgress = progress.interview_progress;
 
         setState({
-          averageScore: Math.round(progress.average_score),
-          sessionsCompleted: progress.sessions_completed,
-          weakAreas: progress.weak_areas,
+          averageScore: Math.round(interviewProgress.average_score),
+          sessionsCompleted: interviewProgress.sessions_completed,
+          weakAreas: interviewProgress.weak_areas,
           history: history.sessions.map((session, index) => ({ label: `S${index + 1}`, score: session.score })),
-          strengthWeakness: buildStrengthWeaknessData(progress.weak_areas, Math.round(progress.average_score)),
+          strengthWeakness: buildStrengthWeaknessData(interviewProgress.weak_areas, Math.round(interviewProgress.average_score)),
         });
       } catch {
         setState((prev) => ({ ...prev, history: [], strengthWeakness: [] }));

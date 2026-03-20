@@ -6,6 +6,7 @@ import { useState } from "react";
 import { signOut } from "next-auth/react";
 import {
   BarChart3,
+  Brain,
   ChevronLeft,
   CreditCard,
   LayoutDashboard,
@@ -27,6 +28,7 @@ const navItems = [
   { href: "/upload", labelID: "Unggah Resume (CV)", labelEN: "Upload Resume (CV)", icon: Upload },
   { href: "/practice", labelID: "Latihan", labelEN: "Practice", icon: MessageSquare },
   { href: "/billing", labelID: "Billing & Top-Up", labelEN: "Billing & Top-Up", icon: CreditCard },
+  { href: "/review", labelID: "Review Coach", labelEN: "Review Coach", icon: Brain },
   { href: "/analytics", labelID: "Analisis Interview", labelEN: "Interview Analytics", icon: BarChart3 },
 ];
 

@@ -524,6 +524,129 @@ func (s *Service) AnalyzeResume(resumeText string) (*domain.ResumeAIAnalysis, er
 	}, nil
 }
 
+func (s *Service) AnalyzeReview(input domain.ReviewAIInput) (*domain.ReviewAIFeedback, error) {
+	if strings.TrimSpace(input.UserInput) == "" {
+		return nil, fmt.Errorf("review input is required")
+	}
+
+	if s.useRemoteProvider() {
+		if remote, err := s.remoteAnalyzeReview(input); err == nil {
+			return remote, nil
+		}
+	}
+
+	normalized := strings.ToLower(strings.TrimSpace(input.UserInput))
+	score := 55
+	communication := 55
+	structure := 50
+	confidence := 50
+
+	strengths := []string{"you are self-aware about the interview outcome"}
+	weaknesses := []string{}
+	suggestions := []string{}
+
+	if containsAny(normalized, []string{"result", "impact", "%", "improved", "increased", "decreased", "dampak", "hasil"}) {
+		score += 12
+		structure += 8
+		strengths = append(strengths, "you mentioned outcomes, not only activities")
+	} else {
+		weaknesses = append(weaknesses, "your story lacks measurable outcomes")
+		suggestions = append(suggestions, "add one concrete metric for each key example")
+	}
+
+	if containsAny(normalized, []string{"situation", "task", "action", "result", "star"}) {
+		score += 14
+		structure += 18
+		strengths = append(strengths, "your answer has recognizable STAR structure")
+	} else {
+		weaknesses = append(weaknesses, "answer structure is unclear")
+		suggestions = append(suggestions, "use STAR order: context, action, measurable result")
+	}
+
+	if containsAny(normalized, []string{"umm", "maybe", "not sure", "kayaknya", "mungkin", "gak yakin"}) {
+		confidence -= 12
+		weaknesses = append(weaknesses, "confidence signal sounds hesitant")
+		suggestions = append(suggestions, "replace hedging words with decisive phrasing")
+	} else {
+		confidence += 10
+		strengths = append(strengths, "your tone reads reasonably confident")
+	}
+
+	if containsAny(normalized, []string{"because", "therefore", "so that", "karena", "sehingga"}) {
+		communication += 12
+		strengths = append(strengths, "your reasoning chain is visible")
+	} else {
+		weaknesses = append(weaknesses, "reasoning behind decisions is under-explained")
+		suggestions = append(suggestions, "explicitly explain why you chose each action")
+	}
+
+	if len(weaknesses) == 0 {
+		weaknesses = append(weaknesses, "there is room to sharpen clarity and brevity")
+	}
+	if len(suggestions) == 0 {
+		suggestions = append(suggestions, "tighten your opening in 2 sentences before deep details")
+	}
+
+	score = clampScore(score)
+	communication = clampScore(communication)
+	structure = clampScore(structure)
+	confidence = clampScore(confidence)
+
+	betterAnswer := "Use this pattern: 'In my previous role, I faced [Situation]. My goal was [Task]. I took [Action 1, 2]. As a result, we achieved [quantified Result]. If repeated, I would improve by [next step].'"
+	if strings.TrimSpace(input.InterviewPrompt) != "" {
+		betterAnswer = fmt.Sprintf("For the question '%s', start with context in one sentence, then 2-3 concrete actions you personally took, and close with a measurable result and lesson learned.", strings.TrimSpace(input.InterviewPrompt))
+	}
+
+	return &domain.ReviewAIFeedback{
+		Score:            score,
+		Communication:    communication,
+		StructureSTAR:    structure,
+		Confidence:       confidence,
+		Strengths:        strengths,
+		Weaknesses:       weaknesses,
+		Suggestions:      suggestions,
+		BetterAnswer:     betterAnswer,
+		Insight:          "Your main opportunity is to improve structure and quantified impact so interviewers can trust your execution level faster.",
+		FollowUpQuestion: "Which part of your original answer felt weakest to you: context, action depth, or measurable result?",
+	}, nil
+}
+
+func (s *Service) GenerateImprovementPlan(history []domain.ReviewSession, memory domain.CoachingMemory) (*domain.ImprovementPlan, error) {
+	if s.useRemoteProvider() {
+		if remote, err := s.remoteGenerateImprovementPlan(history, memory); err == nil {
+			return remote, nil
+		}
+	}
+
+	focusAreas := []string{"STAR structure consistency", "clearer confidence language", "stronger measurable outcomes"}
+	if len(memory.FocusAreas) > 0 {
+		focusAreas = append([]string{}, memory.FocusAreas...)
+	}
+
+	practicePlan := []string{
+		"Record 1 voice reflection using STAR for a failed interview question",
+		"Rewrite 2 past answers with quantified results",
+		"Do 1 mock response where you answer in under 90 seconds with clear structure",
+	}
+
+	if len(history) > 0 {
+		latest := history[0]
+		if latest.Feedback.StructureSTAR < 60 {
+			focusAreas[0] = "STAR structure and narrative flow"
+		}
+		if latest.Feedback.Confidence < 60 {
+			focusAreas[1] = "confidence and concise delivery"
+		}
+	}
+
+	return &domain.ImprovementPlan{
+		FocusAreas:       focusAreas,
+		PracticePlan:     practicePlan,
+		WeeklyTarget:     "Complete at least 2 review sessions and 1 recovery simulation this week",
+		NextSessionFocus: "Answer relevance and stronger action/result details",
+	}, nil
+}
+
 func tokenize(input string) []string {
 	r := strings.NewReplacer(
 		",", " ",
@@ -793,6 +916,16 @@ func containsAnyToken(tokens []string, candidates []string) bool {
 	}
 
 	return false
+}
+
+func clampScore(value int) int {
+	if value < 0 {
+		return 0
+	}
+	if value > 100 {
+		return 100
+	}
+	return value
 }
 
 func (s *Service) useRemoteProvider() bool {
@@ -1066,6 +1199,85 @@ func (s *Service) remoteAnalyzeResumeWithModel(resumeText, modelOverride string)
 	}
 	if len(result.Recommendations) == 0 {
 		result.Recommendations = []string{"Add measurable outcomes and tailor CV to target role."}
+	}
+
+	return &result, nil
+}
+
+func (s *Service) remoteAnalyzeReview(input domain.ReviewAIInput) (*domain.ReviewAIFeedback, error) {
+	systemPrompt := "You are a senior AI Career Coach in Review Mode. You must be specific, actionable, and non-generic. Always produce strict JSON only. If information is missing, ask one follow-up question."
+	userPrompt := fmt.Sprintf(
+		"Analyze this interview reflection and return JSON with keys: score (0-100 int), communication (0-100 int), structure_star (0-100 int), confidence (0-100 int), strengths (array), weaknesses (array), suggestions (array), better_answer (string), insight (string), follow_up_question (string), recovery_simulation (string optional). Focus on why the candidate likely failed and what to improve next. Session type: %s. Input mode: %s. Target role: %s. Target company: %s. Memory weaknesses: %v. Memory focus areas: %v. Interview prompt/context: %s. Candidate reflection: %s",
+		input.SessionType,
+		input.InputMode,
+		input.TargetRole,
+		input.TargetCompany,
+		input.Memory.Weaknesses,
+		input.Memory.FocusAreas,
+		input.InterviewPrompt,
+		input.UserInput,
+	)
+
+	raw, err := s.chatCompletion(systemPrompt, userPrompt)
+	if err != nil {
+		return nil, err
+	}
+
+	var result domain.ReviewAIFeedback
+	if err := extractJSONObject(raw, &result); err != nil {
+		return nil, err
+	}
+
+	result.Score = clampScore(result.Score)
+	result.Communication = clampScore(result.Communication)
+	result.StructureSTAR = clampScore(result.StructureSTAR)
+	result.Confidence = clampScore(result.Confidence)
+	if len(result.Strengths) == 0 {
+		result.Strengths = []string{"reflection provided"}
+	}
+	if len(result.Weaknesses) == 0 {
+		result.Weaknesses = []string{"needs clearer STAR flow"}
+	}
+	if len(result.Suggestions) == 0 {
+		result.Suggestions = []string{"add one measurable result and explicit action ownership"}
+	}
+	if strings.TrimSpace(result.FollowUpQuestion) == "" {
+		result.FollowUpQuestion = "What exact interviewer question do you want to re-answer now?"
+	}
+
+	return &result, nil
+}
+
+func (s *Service) remoteGenerateImprovementPlan(history []domain.ReviewSession, memory domain.CoachingMemory) (*domain.ImprovementPlan, error) {
+	systemPrompt := "You are a senior AI Career Coach. Return only strict JSON."
+	historyBytes, _ := json.Marshal(history)
+	memoryBytes, _ := json.Marshal(memory)
+	userPrompt := fmt.Sprintf(
+		"Build a personalized improvement plan from this review history and coaching memory. Return JSON with keys: focus_areas (2-3 items), practice_plan (2-4 items), weekly_target (string), next_session_focus (string). Be specific and actionable. History: %s. Memory: %s",
+		string(historyBytes),
+		string(memoryBytes),
+	)
+
+	raw, err := s.chatCompletion(systemPrompt, userPrompt)
+	if err != nil {
+		return nil, err
+	}
+
+	var result domain.ImprovementPlan
+	if err := extractJSONObject(raw, &result); err != nil {
+		return nil, err
+	}
+	if len(result.FocusAreas) == 0 {
+		result.FocusAreas = []string{"STAR structure", "confidence", "clarity"}
+	}
+	if len(result.PracticePlan) == 0 {
+		result.PracticePlan = []string{"Run one recovery simulation on last failed interview question"}
+	}
+	if strings.TrimSpace(result.WeeklyTarget) == "" {
+		result.WeeklyTarget = "Complete 2 focused review sessions this week"
+	}
+	if strings.TrimSpace(result.NextSessionFocus) == "" {
+		result.NextSessionFocus = "answer relevance and measurable impact"
 	}
 
 	return &result, nil

@@ -19,6 +19,7 @@ func Setup(
 	subscriptionHandler *handler.SubscriptionHandler,
 	feedbackHandler *handler.FeedbackHandler,
 	progressHandler *handler.ProgressHandler,
+	reviewHandler *handler.ReviewHandler,
 	authMiddleware gin.HandlerFunc,
 	rateLimitMiddleware gin.HandlerFunc,
 ) *gin.Engine {
@@ -52,6 +53,7 @@ func Setup(
 	writeLimited.POST("/voice/tts", voiceHandler.TextToSpeech)
 	writeLimited.POST("/voice/stt", voiceHandler.SpeechToText)
 	writeLimited.POST("/voice/agent/session", voiceHandler.CreateAgentSession)
+	writeLimited.POST("/review/voice/agent/session", voiceHandler.CreateReviewAgentSession)
 	writeLimited.POST("/voice/usage/commit", voiceHandler.CommitVoiceUsage)
 	writeLimited.POST("/session/start", sessionHandler.StartSession)
 	writeLimited.POST("/session/answer", sessionHandler.SubmitAnswer)
@@ -61,7 +63,11 @@ func Setup(
 	api.GET("/subscription/status", subscriptionHandler.GetStatus)
 	writeLimited.POST("/feedback/generate", feedbackHandler.GenerateFeedback)
 	writeLimited.POST("/feedback/agent", feedbackHandler.SubmitAgentFeedback)
+	writeLimited.POST("/review/start", reviewHandler.StartReview)
+	writeLimited.POST("/review/respond", reviewHandler.RespondReview)
+	api.POST("/review/end", reviewHandler.EndReview)
 	api.GET("/progress", progressHandler.GetProgress)
+	api.GET("/coaching-summary", reviewHandler.GetCoachingSummary)
 	api.GET("/analytics/overview", progressHandler.GetAnalyticsOverview)
 
 	return r

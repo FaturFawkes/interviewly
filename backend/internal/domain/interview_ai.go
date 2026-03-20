@@ -31,6 +31,40 @@ type ResumeAIAnalysis struct {
 	Recommendations []string `json:"recommendations"`
 }
 
+// ReviewAIInput represents one coaching turn context for review mode.
+type ReviewAIInput struct {
+	SessionType     string         `json:"session_type"`
+	InputMode       string         `json:"input_mode"`
+	UserInput       string         `json:"user_input"`
+	InterviewPrompt string         `json:"interview_prompt,omitempty"`
+	TargetRole      string         `json:"target_role,omitempty"`
+	TargetCompany   string         `json:"target_company,omitempty"`
+	Memory          CoachingMemory `json:"memory"`
+}
+
+// ReviewAIFeedback is structured coaching output for review mode.
+type ReviewAIFeedback struct {
+	Score              int      `json:"score"`
+	Communication      int      `json:"communication"`
+	StructureSTAR      int      `json:"structure_star"`
+	Confidence         int      `json:"confidence"`
+	Strengths          []string `json:"strengths"`
+	Weaknesses         []string `json:"weaknesses"`
+	Suggestions        []string `json:"suggestions"`
+	BetterAnswer       string   `json:"better_answer"`
+	Insight            string   `json:"insight"`
+	FollowUpQuestion   string   `json:"follow_up_question"`
+	RecoverySimulation string   `json:"recovery_simulation,omitempty"`
+}
+
+// ImprovementPlan contains personalized actions generated from user history.
+type ImprovementPlan struct {
+	FocusAreas       []string `json:"focus_areas"`
+	PracticePlan     []string `json:"practice_plan"`
+	WeeklyTarget     string   `json:"weekly_target"`
+	NextSessionFocus string   `json:"next_session_focus"`
+}
+
 // AIService defines all AI-related business capabilities required by backend workflows.
 type AIService interface {
 	ParseJobDescription(jobDescription string) (*JobInsights, error)
@@ -43,4 +77,6 @@ type AIService interface {
 	) ([]GeneratedQuestion, error)
 	AnalyzeAnswer(question, answer string, interviewLanguage InterviewLanguage) (*AnswerAnalysis, error)
 	AnalyzeResume(resumeText string) (*ResumeAIAnalysis, error)
+	AnalyzeReview(input ReviewAIInput) (*ReviewAIFeedback, error)
+	GenerateImprovementPlan(history []ReviewSession, memory CoachingMemory) (*ImprovementPlan, error)
 }

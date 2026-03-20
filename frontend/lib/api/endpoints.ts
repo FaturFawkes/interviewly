@@ -9,7 +9,11 @@ import type {
   ParsedJobDescription,
   ResumeAIAnalysis,
   PracticeSession,
-  ProgressMetrics,
+  ProgressResponse,
+  ReviewEndResponse,
+  ReviewResponse,
+  ReviewRespondPayload,
+  ReviewStartPayload,
   ResumeRecord,
   SessionStartMetadata,
   SessionAnswer,
@@ -106,6 +110,12 @@ export const api = {
       body: { include_conversation_id: includeConversationID },
     }),
 
+  createReviewVoiceAgentSession: (includeConversationID = false): Promise<VoiceAgentSession> =>
+    apiRequest("/api/review/voice/agent/session", {
+      method: "POST",
+      body: { include_conversation_id: includeConversationID },
+    }),
+
   commitVoiceUsage: (sessionID: string, elapsedSeconds: number): Promise<VoiceUsageCommitResponse> =>
     apiRequest("/api/voice/usage/commit", {
       method: "POST",
@@ -123,7 +133,27 @@ export const api = {
 
   getAnalyticsOverview: (): Promise<AnalyticsOverview> => apiRequest("/api/analytics/overview"),
 
-  getProgress: (): Promise<ProgressMetrics> => apiRequest("/api/progress"),
+  getProgress: (): Promise<ProgressResponse> => apiRequest("/api/progress"),
+
+  startReview: (payload: ReviewStartPayload): Promise<ReviewResponse> =>
+    apiRequest("/api/review/start", {
+      method: "POST",
+      body: payload,
+    }),
+
+  respondReview: (payload: ReviewRespondPayload): Promise<ReviewResponse> =>
+    apiRequest("/api/review/respond", {
+      method: "POST",
+      body: payload,
+    }),
+
+  endReview: (sessionID: string): Promise<ReviewEndResponse> =>
+    apiRequest("/api/review/end", {
+      method: "POST",
+      body: { session_id: sessionID },
+    }),
+
+  getCoachingSummary: (): Promise<ReviewEndResponse> => apiRequest("/api/coaching-summary"),
 
   getSessionHistory: (): Promise<SessionHistoryResponse> => apiRequest("/api/session/history"),
 

@@ -15,15 +15,17 @@ import (
 )
 
 type Service struct {
-	provider string
-	apiKey   string
-	voiceID  string
-	ttsModel string
-	sttModel string
-	agentID  string
-	branchID string
-	baseURL  string
-	client   *http.Client
+	provider       string
+	apiKey         string
+	voiceID        string
+	ttsModel       string
+	sttModel       string
+	agentID        string
+	branchID       string
+	reviewAgentID  string
+	reviewBranchID string
+	baseURL        string
+	client         *http.Client
 }
 
 type STTResult struct {
@@ -43,6 +45,8 @@ func NewService(cfg *config.Config) *Service {
 	sttModel := "scribe_v1"
 	agentID := ""
 	branchID := ""
+	reviewAgentID := ""
+	reviewBranchID := ""
 
 	if cfg != nil {
 		provider = strings.ToLower(strings.TrimSpace(cfg.VoiceProvider))
@@ -52,6 +56,8 @@ func NewService(cfg *config.Config) *Service {
 		sttModel = strings.TrimSpace(cfg.ElevenLabsSTTModel)
 		agentID = strings.TrimSpace(cfg.ElevenLabsAgentID)
 		branchID = strings.TrimSpace(cfg.ElevenLabsAgentBranchID)
+		reviewAgentID = strings.TrimSpace(cfg.ElevenLabsReviewAgentID)
+		reviewBranchID = strings.TrimSpace(cfg.ElevenLabsReviewAgentBranchID)
 	}
 
 	if provider == "" {
@@ -68,15 +74,17 @@ func NewService(cfg *config.Config) *Service {
 	}
 
 	return &Service{
-		provider: provider,
-		apiKey:   apiKey,
-		voiceID:  voiceID,
-		ttsModel: ttsModel,
-		sttModel: sttModel,
-		agentID:  agentID,
-		branchID: branchID,
-		baseURL:  "https://api.elevenlabs.io/v1",
-		client:   &http.Client{Timeout: 45 * time.Second},
+		provider:       provider,
+		apiKey:         apiKey,
+		voiceID:        voiceID,
+		ttsModel:       ttsModel,
+		sttModel:       sttModel,
+		agentID:        agentID,
+		branchID:       branchID,
+		reviewAgentID:  reviewAgentID,
+		reviewBranchID: reviewBranchID,
+		baseURL:        "https://api.elevenlabs.io/v1",
+		client:         &http.Client{Timeout: 45 * time.Second},
 	}
 }
 
@@ -88,18 +96,34 @@ func (s *Service) AgentIsReady() bool {
 	return s.IsReady() && strings.TrimSpace(s.agentID) != ""
 }
 
+func (s *Service) ReviewAgentIsReady() bool {
+	return s.IsReady() && strings.TrimSpace(s.reviewAgentID) != ""
+}
+
 func (s *Service) GetAgentSignedURL(includeConversationID bool) (*AgentSignedURLResult, error) {
 	if !s.AgentIsReady() {
 		return nil, fmt.Errorf("elevenlabs agent is not configured")
 	}
 
+	return s.getAgentSignedURL(s.agentID, s.branchID, includeConversationID)
+}
+
+func (s *Service) GetReviewAgentSignedURL(includeConversationID bool) (*AgentSignedURLResult, error) {
+	if !s.ReviewAgentIsReady() {
+		return nil, fmt.Errorf("elevenlabs review agent is not configured")
+	}
+
+	return s.getAgentSignedURL(s.reviewAgentID, s.reviewBranchID, includeConversationID)
+}
+
+func (s *Service) getAgentSignedURL(agentID, branchID string, includeConversationID bool) (*AgentSignedURLResult, error) {
 	queryValues := url.Values{}
-	queryValues.Set("agent_id", s.agentID)
+	queryValues.Set("agent_id", strings.TrimSpace(agentID))
 	if includeConversationID {
 		queryValues.Set("include_conversation_id", "true")
 	}
-	if strings.TrimSpace(s.branchID) != "" {
-		queryValues.Set("branch_id", s.branchID)
+	if strings.TrimSpace(branchID) != "" {
+		queryValues.Set("branch_id", branchID)
 	}
 
 	requestURL := fmt.Sprintf("%s/convai/conversation/get-signed-url?%s", s.baseURL, queryValues.Encode())

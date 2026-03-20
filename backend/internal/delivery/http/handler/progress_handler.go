@@ -37,7 +37,16 @@ func (h *ProgressHandler) GetProgress(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, progress)
+	reviewProgress, reviewErr := h.interviewUC.GetReviewProgress(userID)
+	if reviewErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": reviewErr.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"interview_progress": progress,
+		"review_progress":    reviewProgress,
+	})
 }
 
 // GetAnalyticsOverview handles GET /api/analytics/overview.

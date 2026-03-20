@@ -6,6 +6,8 @@ const (
 	SessionStatusActive                             = "active"
 	SessionStatusCompleted                          = "completed"
 	SessionStatusAbandoned                          = "abandoned"
+	ReviewSessionTypeStandard                       = "review"
+	ReviewSessionTypeRecovery                       = "recovery"
 	InterviewLanguageEnglish    InterviewLanguage   = "en"
 	InterviewLanguageIndonesian InterviewLanguage   = "id"
 	InterviewModeText           InterviewMode       = "text"
@@ -165,6 +167,81 @@ type ProgressMetrics struct {
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
+type ReviewSession struct {
+	ID              string           `json:"id"`
+	UserID          string           `json:"user_id"`
+	SessionType     string           `json:"session_type"`
+	InputMode       string           `json:"input_mode"`
+	InputText       string           `json:"input_text,omitempty"`
+	VoiceURL        string           `json:"voice_url,omitempty"`
+	TranscriptText  string           `json:"transcript_text,omitempty"`
+	RoleTarget      string           `json:"role_target,omitempty"`
+	CompanyTarget   string           `json:"company_target,omitempty"`
+	Status          string           `json:"status"`
+	Feedback        ReviewAIFeedback `json:"feedback"`
+	CreatedAt       time.Time        `json:"created_at"`
+	UpdatedAt       time.Time        `json:"updated_at"`
+	CompletedAt     *time.Time       `json:"completed_at,omitempty"`
+	ImprovementPlan *ImprovementPlan `json:"improvement_plan,omitempty"`
+}
+
+type CoachingMemory struct {
+	UserID            string    `json:"user_id"`
+	TargetRole        string    `json:"target_role,omitempty"`
+	Strengths         []string  `json:"strengths"`
+	Weaknesses        []string  `json:"weaknesses"`
+	PreferredLanguage string    `json:"preferred_language"`
+	LastSummary       string    `json:"last_summary"`
+	FocusAreas        []string  `json:"focus_areas"`
+	NextActions       []string  `json:"next_actions"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+type ProgressTrackingPoint struct {
+	ReviewSessionID string    `json:"review_session_id,omitempty"`
+	Communication   int       `json:"communication"`
+	StructureSTAR   int       `json:"structure_star"`
+	Confidence      int       `json:"confidence"`
+	OverallScore    int       `json:"overall_score"`
+	Notes           string    `json:"notes,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+type ReviewProgress struct {
+	UserID              string                  `json:"user_id"`
+	CommunicationTrend  []ProgressTrackingPoint `json:"communication_trend"`
+	StructureTrend      []ProgressTrackingPoint `json:"structure_trend"`
+	ConfidenceTrend     []ProgressTrackingPoint `json:"confidence_trend"`
+	LatestOverallScore  int                     `json:"latest_overall_score"`
+	AverageOverallScore float64                 `json:"average_overall_score"`
+}
+
+type ReviewStartInput struct {
+	SessionType     string `json:"session_type"`
+	InputMode       string `json:"input_mode"`
+	InputText       string `json:"input_text,omitempty"`
+	VoiceURL        string `json:"voice_url,omitempty"`
+	TranscriptText  string `json:"transcript_text,omitempty"`
+	InterviewPrompt string `json:"interview_prompt,omitempty"`
+	TargetRole      string `json:"target_role,omitempty"`
+	TargetCompany   string `json:"target_company,omitempty"`
+}
+
+type ReviewRespondInput struct {
+	SessionID       string `json:"session_id"`
+	InputText       string `json:"input_text,omitempty"`
+	VoiceURL        string `json:"voice_url,omitempty"`
+	TranscriptText  string `json:"transcript_text,omitempty"`
+	InterviewPrompt string `json:"interview_prompt,omitempty"`
+}
+
+type ReviewEndResult struct {
+	SessionID       string           `json:"session_id"`
+	Feedback        ReviewAIFeedback `json:"feedback"`
+	ImprovementPlan ImprovementPlan  `json:"improvement_plan"`
+	CoachingSummary string           `json:"coaching_summary"`
+}
+
 // AgentFeedbackInput represents feedback generated externally (e.g. conversational agent)
 // and submitted to backend as the source of truth for scoring.
 type AgentFeedbackInput struct {
@@ -192,6 +269,15 @@ type InterviewRepository interface {
 	GetProgressMetrics(userID string) (*ProgressMetrics, error)
 	TouchSessionActivity(userID, sessionID string) error
 	AbandonIdleSessions(idleFor time.Duration) (int64, error)
+	CreateReviewSession(userID string, input ReviewStartInput) (*ReviewSession, error)
+	GetReviewSession(userID, sessionID string) (*ReviewSession, error)
+	UpdateReviewSessionFeedback(userID, sessionID string, feedback ReviewAIFeedback, appendInput string) (*ReviewSession, error)
+	CompleteReviewSession(userID, sessionID string, plan *ImprovementPlan, summary string) (*ReviewSession, error)
+	ListRecentReviewSessions(userID string, limit int) ([]ReviewSession, error)
+	GetCoachingMemory(userID string) (*CoachingMemory, error)
+	UpsertCoachingMemory(memory CoachingMemory) (*CoachingMemory, error)
+	SaveProgressTrackingPoint(userID, reviewSessionID string, point ProgressTrackingPoint) (*ProgressTrackingPoint, error)
+	ListProgressTracking(userID string, limit int) ([]ProgressTrackingPoint, error)
 }
 
 // InterviewUseCase defines interview workflows.
@@ -213,4 +299,9 @@ type InterviewUseCase interface {
 	GetAnalyticsOverview(userID string) (*AnalyticsOverview, error)
 	TouchSessionActivity(userID, sessionID string) error
 	AbandonIdleSessions(idleFor time.Duration) (int64, error)
+	StartReviewSession(userID string, input ReviewStartInput) (*ReviewSession, error)
+	RespondReviewSession(userID string, input ReviewRespondInput) (*ReviewSession, error)
+	EndReviewSession(userID, sessionID string) (*ReviewEndResult, error)
+	GetReviewProgress(userID string) (*ReviewProgress, error)
+	GetCoachingSummary(userID string) (*ReviewEndResult, error)
 }
