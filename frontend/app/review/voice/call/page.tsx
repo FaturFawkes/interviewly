@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { api } from "@/lib/api/endpoints";
 import { pickLocaleText } from "@/lib/i18n";
+import type { InterviewLanguage } from "@/lib/api/types";
 
 type TranscriptItem = {
   id: string;
@@ -69,12 +70,17 @@ function serializeTranscript(items: TranscriptItem[]): string {
     .join("\n");
 }
 
+function resolveInterviewLanguage(value: string | null): InterviewLanguage {
+  return value === "en" ? "en" : "id";
+}
+
 function ReviewVoiceCallPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { locale } = useLanguage();
 
   const sessionType = searchParams.get("session_type") === "recovery" ? "recovery" : "review";
+  const interviewLanguage = resolveInterviewLanguage(searchParams.get("interview_language"));
   const targetRole = (searchParams.get("target_role") ?? "").trim();
   const targetCompany = (searchParams.get("target_company") ?? "").trim();
   const interviewPrompt = (searchParams.get("interview_prompt") ?? "").trim();
@@ -92,6 +98,24 @@ function ReviewVoiceCallPageContent() {
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [transcriptItems, setTranscriptItems] = useState<TranscriptItem[]>([]);
+
+  const buildAgentContextInstruction = useCallback(() => {
+    const languageInstruction = interviewLanguage === "id"
+      ? "Gunakan Bahasa Indonesia saja untuk seluruh respons percakapan."
+      : "Use English only for all conversational responses.";
+
+    return [
+      "You are an AI career coach for a live voice review call.",
+      languageInstruction,
+      `Session type: ${sessionType}.`,
+      `Target role: ${targetRole || "not provided"}.`,
+      `Target company: ${targetCompany || "not provided"}.`,
+      `Interview prompt: ${interviewPrompt || "not provided"}.`,
+      "Ask one focused follow-up at a time and wait for user response.",
+      "Keep responses natural, concise, and actionable.",
+      "Do not produce JSON or machine-readable output while speaking.",
+    ].join(" ");
+  }, [interviewLanguage, interviewPrompt, sessionType, targetCompany, targetRole]);
 
   useEffect(() => {
     isCallActiveRef.current = isCallActive;
@@ -131,6 +155,7 @@ function ReviewVoiceCallPageContent() {
       const review = await api.startReview({
         session_type: sessionType,
         input_mode: "voice",
+        interview_language: interviewLanguage,
         transcript_text: transcriptText,
         interview_prompt: interviewPrompt,
         target_role: targetRole,
@@ -152,7 +177,7 @@ function ReviewVoiceCallPageContent() {
       setSubmitting(false);
       finalizingRef.current = false;
     }
-  }, [interviewPrompt, locale, router, sessionType, targetCompany, targetRole, transcriptItems]);
+  }, [interviewLanguage, interviewPrompt, locale, router, sessionType, targetCompany, targetRole, transcriptItems]);
 
   const endConversation = useCallback(async () => {
     setIsCallActive(false);
@@ -187,8 +212,21 @@ function ReviewVoiceCallPageContent() {
         const conversation = await Conversation.startSession({
           signedUrl: agentSession.signed_url,
           connectionType: "websocket",
+          overrides: {
+            agent: {
+              language: interviewLanguage,
+            },
+          },
+          dynamicVariables: {
+            interview_language: interviewLanguage,
+          },
           onConnect: () => {
             setVoiceInfo(pickLocaleText(locale, "Terhubung. Ceritakan pengalaman interview Anda.", "Connected. Share your interview experience."));
+            try {
+              conversationRef.current?.sendContextualUpdate(buildAgentContextInstruction());
+            } catch {
+              setVoiceError(pickLocaleText(locale, "Gagal mengirim preferensi bahasa ke coach.", "Failed to send language preferences to coach."));
+            }
           },
           onStatusChange: ({ status }) => {
             setAgentStatus(status);
@@ -228,7 +266,7 @@ function ReviewVoiceCallPageContent() {
       cancelled = true;
       void endConversation();
     };
-  }, [appendTranscript, endConversation, finalizeVoiceReview, locale]);
+  }, [appendTranscript, buildAgentContextInstruction, endConversation, finalizeVoiceReview, interviewLanguage, locale]);
 
   const transcriptPreview = useMemo(() => transcriptItems.slice(-14), [transcriptItems]);
 
@@ -259,10 +297,14 @@ function ReviewVoiceCallPageContent() {
           {voiceInfo && <p className="text-sm text-cyan-200">{voiceInfo}</p>}
           {voiceError && <p className="text-sm text-red-300">{voiceError}</p>}
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-4">
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <p className="text-xs text-white/55">{pickLocaleText(locale, "Session type", "Session type")}</p>
               <p className="mt-1 text-sm font-medium text-white">{getSessionTypeLabel(locale, sessionType)}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-xs text-white/55">{pickLocaleText(locale, "Interview language", "Interview language")}</p>
+              <p className="mt-1 text-sm font-medium text-white">{interviewLanguage === "id" ? "Bahasa Indonesia" : "English"}</p>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <p className="text-xs text-white/55">{pickLocaleText(locale, "Target role", "Target role")}</p>

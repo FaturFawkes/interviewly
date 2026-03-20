@@ -169,21 +169,22 @@ type ProgressMetrics struct {
 }
 
 type ReviewSession struct {
-	ID              string           `json:"id"`
-	UserID          string           `json:"user_id"`
-	SessionType     string           `json:"session_type"`
-	InputMode       string           `json:"input_mode"`
-	InputText       string           `json:"input_text,omitempty"`
-	VoiceURL        string           `json:"voice_url,omitempty"`
-	TranscriptText  string           `json:"transcript_text,omitempty"`
-	RoleTarget      string           `json:"role_target,omitempty"`
-	CompanyTarget   string           `json:"company_target,omitempty"`
-	Status          string           `json:"status"`
-	Feedback        ReviewAIFeedback `json:"feedback"`
-	CreatedAt       time.Time        `json:"created_at"`
-	UpdatedAt       time.Time        `json:"updated_at"`
-	CompletedAt     *time.Time       `json:"completed_at,omitempty"`
-	ImprovementPlan *ImprovementPlan `json:"improvement_plan,omitempty"`
+	ID                string           `json:"id"`
+	UserID            string           `json:"user_id"`
+	SessionType       string           `json:"session_type"`
+	InputMode         string           `json:"input_mode"`
+	InterviewLanguage string           `json:"interview_language"`
+	InputText         string           `json:"input_text,omitempty"`
+	VoiceURL          string           `json:"voice_url,omitempty"`
+	TranscriptText    string           `json:"transcript_text,omitempty"`
+	RoleTarget        string           `json:"role_target,omitempty"`
+	CompanyTarget     string           `json:"company_target,omitempty"`
+	Status            string           `json:"status"`
+	Feedback          ReviewAIFeedback `json:"feedback"`
+	CreatedAt         time.Time        `json:"created_at"`
+	UpdatedAt         time.Time        `json:"updated_at"`
+	CompletedAt       *time.Time       `json:"completed_at,omitempty"`
+	ImprovementPlan   *ImprovementPlan `json:"improvement_plan,omitempty"`
 }
 
 type CoachingMemory struct {
@@ -218,22 +219,24 @@ type ReviewProgress struct {
 }
 
 type ReviewStartInput struct {
-	SessionType     string `json:"session_type"`
-	InputMode       string `json:"input_mode"`
-	InputText       string `json:"input_text,omitempty"`
-	VoiceURL        string `json:"voice_url,omitempty"`
-	TranscriptText  string `json:"transcript_text,omitempty"`
-	InterviewPrompt string `json:"interview_prompt,omitempty"`
-	TargetRole      string `json:"target_role,omitempty"`
-	TargetCompany   string `json:"target_company,omitempty"`
+	SessionType       string `json:"session_type"`
+	InputMode         string `json:"input_mode"`
+	InterviewLanguage string `json:"interview_language,omitempty"`
+	InputText         string `json:"input_text,omitempty"`
+	VoiceURL          string `json:"voice_url,omitempty"`
+	TranscriptText    string `json:"transcript_text,omitempty"`
+	InterviewPrompt   string `json:"interview_prompt,omitempty"`
+	TargetRole        string `json:"target_role,omitempty"`
+	TargetCompany     string `json:"target_company,omitempty"`
 }
 
 type ReviewRespondInput struct {
-	SessionID       string `json:"session_id"`
-	InputText       string `json:"input_text,omitempty"`
-	VoiceURL        string `json:"voice_url,omitempty"`
-	TranscriptText  string `json:"transcript_text,omitempty"`
-	InterviewPrompt string `json:"interview_prompt,omitempty"`
+	SessionID         string `json:"session_id"`
+	InterviewLanguage string `json:"interview_language,omitempty"`
+	InputText         string `json:"input_text,omitempty"`
+	VoiceURL          string `json:"voice_url,omitempty"`
+	TranscriptText    string `json:"transcript_text,omitempty"`
+	InterviewPrompt   string `json:"interview_prompt,omitempty"`
 }
 
 type ReviewEndResult struct {

@@ -604,6 +604,7 @@ func (uc *interviewUseCase) StartReviewSession(userID string, input domain.Revie
 	if err != nil {
 		return nil, err
 	}
+	input.InterviewLanguage = normalizeReviewInterviewLanguage(input.InterviewLanguage, memory.PreferredLanguage)
 
 	session, err := uc.repo.CreateReviewSession(userID, input)
 	if err != nil {
@@ -616,13 +617,14 @@ func (uc *interviewUseCase) StartReviewSession(userID string, input domain.Revie
 	}
 
 	feedback, scoreReady := uc.analyzeReviewTurn(domain.ReviewAIInput{
-		SessionType:     input.SessionType,
-		InputMode:       input.InputMode,
-		UserInput:       userInput,
-		InterviewPrompt: input.InterviewPrompt,
-		TargetRole:      input.TargetRole,
-		TargetCompany:   input.TargetCompany,
-		Memory:          *memory,
+		SessionType:       input.SessionType,
+		InputMode:         input.InputMode,
+		InterviewLanguage: domain.NormalizeInterviewLanguage(input.InterviewLanguage),
+		UserInput:         userInput,
+		InterviewPrompt:   input.InterviewPrompt,
+		TargetRole:        input.TargetRole,
+		TargetCompany:     input.TargetCompany,
+		Memory:            *memory,
 	})
 
 	updated, err := uc.repo.UpdateReviewSessionFeedback(userID, session.ID, feedback, userInput)
@@ -663,6 +665,7 @@ func (uc *interviewUseCase) RespondReviewSession(userID string, input domain.Rev
 	if err != nil {
 		return nil, err
 	}
+	input.InterviewLanguage = normalizeReviewInterviewLanguage(input.InterviewLanguage, session.InterviewLanguage, memory.PreferredLanguage)
 
 	userInput := strings.TrimSpace(input.InputText)
 	if userInput == "" {
@@ -673,13 +676,14 @@ func (uc *interviewUseCase) RespondReviewSession(userID string, input domain.Rev
 	}
 
 	feedback, scoreReady := uc.analyzeReviewTurn(domain.ReviewAIInput{
-		SessionType:     session.SessionType,
-		InputMode:       session.InputMode,
-		UserInput:       userInput,
-		InterviewPrompt: input.InterviewPrompt,
-		TargetRole:      session.RoleTarget,
-		TargetCompany:   session.CompanyTarget,
-		Memory:          *memory,
+		SessionType:       session.SessionType,
+		InputMode:         session.InputMode,
+		InterviewLanguage: domain.NormalizeInterviewLanguage(input.InterviewLanguage),
+		UserInput:         userInput,
+		InterviewPrompt:   input.InterviewPrompt,
+		TargetRole:        session.RoleTarget,
+		TargetCompany:     session.CompanyTarget,
+		Memory:            *memory,
 	})
 
 	updated, err := uc.repo.UpdateReviewSessionFeedback(userID, session.ID, feedback, userInput)
@@ -748,7 +752,7 @@ func (uc *interviewUseCase) EndReviewSession(userID, sessionID string) (*domain.
 		TargetRole:        firstNonEmpty(completed.RoleTarget, memory.TargetRole),
 		Strengths:         uniqueStrings(completed.Feedback.Strengths, memory.Strengths),
 		Weaknesses:        uniqueStrings(completed.Feedback.Weaknesses, memory.Weaknesses),
-		PreferredLanguage: firstNonEmpty(memory.PreferredLanguage, "en"),
+		PreferredLanguage: normalizeReviewInterviewLanguage(completed.InterviewLanguage, memory.PreferredLanguage),
 		LastSummary:       coachingSummary,
 		FocusAreas:        append([]string{}, plan.FocusAreas...),
 		NextActions:       append([]string{}, plan.PracticePlan...),
@@ -1217,6 +1221,18 @@ func normalizeReviewInputMode(value string) string {
 		return string(domain.InterviewModeVoice)
 	}
 	return string(domain.InterviewModeText)
+}
+
+func normalizeReviewInterviewLanguage(values ...string) string {
+	for _, value := range values {
+		trimmed := strings.TrimSpace(strings.ToLower(value))
+		if trimmed == "" {
+			continue
+		}
+		return string(domain.NormalizeInterviewLanguage(trimmed))
+	}
+
+	return string(domain.InterviewLanguageEnglish)
 }
 
 func (uc *interviewUseCase) analyzeReviewTurn(input domain.ReviewAIInput) (domain.ReviewAIFeedback, bool) {

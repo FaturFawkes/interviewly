@@ -12,6 +12,7 @@ import { Input, TextArea } from "@/components/ui/Input";
 import { api } from "@/lib/api/endpoints";
 import { pickLocaleText } from "@/lib/i18n";
 import type {
+  InterviewLanguage,
   InterviewMode,
   ReviewEndResponse,
   ReviewProgress,
@@ -30,6 +31,7 @@ export default function ReviewPage() {
 
   const [sessionType, setSessionType] = useState<"review" | "recovery">("review");
   const [inputMode, setInputMode] = useState<InterviewMode>("text");
+  const [interviewLanguage, setInterviewLanguage] = useState<InterviewLanguage>("id");
   const [targetRole, setTargetRole] = useState("");
   const [targetCompany, setTargetCompany] = useState("");
   const [interviewPrompt, setInterviewPrompt] = useState("");
@@ -67,6 +69,7 @@ export default function ReviewPage() {
     if (inputMode === "voice") {
       const params = new URLSearchParams({
         session_type: sessionType,
+        interview_language: interviewLanguage,
         target_role: targetRole,
         target_company: targetCompany,
         interview_prompt: interviewPrompt,
@@ -87,6 +90,7 @@ export default function ReviewPage() {
       const payload: ReviewStartPayload = {
         session_type: sessionType,
         input_mode: inputMode,
+        interview_language: interviewLanguage,
         interview_prompt: interviewPrompt,
         target_role: targetRole,
         target_company: targetCompany,
@@ -118,8 +122,10 @@ export default function ReviewPage() {
     setError(null);
     setLoadingRespond(true);
     try {
+      const activeLanguage = activeSession.interview_language || interviewLanguage;
       const result = await api.respondReview({
         session_id: activeSession.id,
+        interview_language: activeLanguage,
         interview_prompt: interviewPrompt,
         ...(inputMode === "voice" ? { transcript_text: responseInput } : { input_text: responseInput }),
       });
@@ -223,6 +229,28 @@ export default function ReviewPage() {
                 })}
               </div>
             </label>
+          </div>
+
+          <div className="space-y-1">
+            <span className="text-sm text-white/70">{pickLocaleText(locale, "Bahasa review", "Review language")}</span>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setInterviewLanguage("id")}
+                disabled={Boolean(activeSession)}
+                className={`rounded-xl border px-3 py-2 text-sm ${interviewLanguage === "id" ? "border-cyan-300/45 bg-cyan-400/15 text-cyan-100" : "border-white/10 bg-white/5 text-white/70"} ${activeSession ? "cursor-not-allowed opacity-60" : ""}`}
+              >
+                Bahasa Indonesia
+              </button>
+              <button
+                type="button"
+                onClick={() => setInterviewLanguage("en")}
+                disabled={Boolean(activeSession)}
+                className={`rounded-xl border px-3 py-2 text-sm ${interviewLanguage === "en" ? "border-cyan-300/45 bg-cyan-400/15 text-cyan-100" : "border-white/10 bg-white/5 text-white/70"} ${activeSession ? "cursor-not-allowed opacity-60" : ""}`}
+              >
+                English
+              </button>
+            </div>
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">

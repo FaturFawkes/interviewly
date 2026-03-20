@@ -1011,16 +1011,17 @@ func (r *interviewRepository) CreateReviewSession(userID string, input domain.Re
 	}
 
 	session := &domain.ReviewSession{
-		ID:             uuid.NewString(),
-		UserID:         userID,
-		SessionType:    sessionType,
-		InputMode:      inputMode,
-		InputText:      strings.TrimSpace(input.InputText),
-		VoiceURL:       strings.TrimSpace(input.VoiceURL),
-		TranscriptText: strings.TrimSpace(input.TranscriptText),
-		RoleTarget:     strings.TrimSpace(input.TargetRole),
-		CompanyTarget:  strings.TrimSpace(input.TargetCompany),
-		Status:         domain.SessionStatusActive,
+		ID:                uuid.NewString(),
+		UserID:            userID,
+		SessionType:       sessionType,
+		InputMode:         inputMode,
+		InterviewLanguage: string(domain.NormalizeInterviewLanguage(input.InterviewLanguage)),
+		InputText:         strings.TrimSpace(input.InputText),
+		VoiceURL:          strings.TrimSpace(input.VoiceURL),
+		TranscriptText:    strings.TrimSpace(input.TranscriptText),
+		RoleTarget:        strings.TrimSpace(input.TargetRole),
+		CompanyTarget:     strings.TrimSpace(input.TargetCompany),
+		Status:            domain.SessionStatusActive,
 		Feedback: domain.ReviewAIFeedback{
 			Strengths:   []string{},
 			Weaknesses:  []string{},
@@ -1042,13 +1043,14 @@ func (r *interviewRepository) CreateReviewSession(userID string, input domain.Re
 		_, err := r.pool.Exec(
 			ctx,
 			`INSERT INTO app_review_sessions
-				(id, user_id, session_type, input_mode, input_text, voice_url, transcript_text, role_target, company_target, status, ai_feedback, score, communication_score, structure_score, confidence_score, created_at, updated_at)
+				(id, user_id, session_type, input_mode, interview_language, input_text, voice_url, transcript_text, role_target, company_target, status, ai_feedback, score, communication_score, structure_score, confidence_score, created_at, updated_at)
 			 VALUES
-				($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15, $16, $17)`,
+				($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15, $16, $17, $18)`,
 			session.ID,
 			session.UserID,
 			session.SessionType,
 			session.InputMode,
+			session.InterviewLanguage,
 			session.InputText,
 			session.VoiceURL,
 			session.TranscriptText,
@@ -1083,7 +1085,7 @@ func (r *interviewRepository) GetReviewSession(userID, sessionID string) (*domai
 		var feedbackJSON []byte
 		err := r.pool.QueryRow(
 			ctx,
-			`SELECT id, user_id, session_type, input_mode, input_text, voice_url, transcript_text, role_target, company_target, status,
+			`SELECT id, user_id, session_type, input_mode, interview_language, input_text, voice_url, transcript_text, role_target, company_target, status,
 					ai_feedback, score, communication_score, structure_score, confidence_score, created_at, updated_at, completed_at
 			   FROM app_review_sessions
 			  WHERE id = $1 AND user_id = $2`,
@@ -1094,6 +1096,7 @@ func (r *interviewRepository) GetReviewSession(userID, sessionID string) (*domai
 			&session.UserID,
 			&session.SessionType,
 			&session.InputMode,
+			&session.InterviewLanguage,
 			&session.InputText,
 			&session.VoiceURL,
 			&session.TranscriptText,
@@ -1160,7 +1163,7 @@ func (r *interviewRepository) UpdateReviewSessionFeedback(userID, sessionID stri
 					transcript_text = CASE WHEN $8 = '' THEN transcript_text ELSE CONCAT_WS(E'\n', transcript_text, $8) END,
 					updated_at = $9
 			  WHERE id = $1 AND user_id = $2
-			  RETURNING id, user_id, session_type, input_mode, input_text, voice_url, transcript_text, role_target, company_target, status,
+			  RETURNING id, user_id, session_type, input_mode, interview_language, input_text, voice_url, transcript_text, role_target, company_target, status,
 						ai_feedback, score, communication_score, structure_score, confidence_score, created_at, updated_at, completed_at`,
 			sessionID,
 			userID,
@@ -1176,6 +1179,7 @@ func (r *interviewRepository) UpdateReviewSessionFeedback(userID, sessionID stri
 			&session.UserID,
 			&session.SessionType,
 			&session.InputMode,
+			&session.InterviewLanguage,
 			&session.InputText,
 			&session.VoiceURL,
 			&session.TranscriptText,
@@ -1290,7 +1294,7 @@ func (r *interviewRepository) ListRecentReviewSessions(userID string, limit int)
 
 		rows, err := r.pool.Query(
 			ctx,
-			`SELECT id, user_id, session_type, input_mode, input_text, voice_url, transcript_text, role_target, company_target, status,
+			`SELECT id, user_id, session_type, input_mode, interview_language, input_text, voice_url, transcript_text, role_target, company_target, status,
 					ai_feedback, score, communication_score, structure_score, confidence_score, created_at, updated_at, completed_at
 			   FROM app_review_sessions
 			  WHERE user_id = $1
@@ -1310,6 +1314,7 @@ func (r *interviewRepository) ListRecentReviewSessions(userID string, limit int)
 					&session.UserID,
 					&session.SessionType,
 					&session.InputMode,
+					&session.InterviewLanguage,
 					&session.InputText,
 					&session.VoiceURL,
 					&session.TranscriptText,

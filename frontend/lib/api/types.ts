@@ -211,6 +211,7 @@ export type ReviewSession = {
   user_id: string;
   session_type: "review" | "recovery";
   input_mode: InterviewMode;
+  interview_language: InterviewLanguage;
   input_text?: string;
   voice_url?: string;
   transcript_text?: string;
@@ -233,6 +234,7 @@ export type ImprovementPlan = {
 export type ReviewStartPayload = {
   session_type?: "review" | "recovery";
   input_mode?: InterviewMode;
+  interview_language?: InterviewLanguage;
   input_text?: string;
   voice_url?: string;
   transcript_text?: string;
@@ -243,6 +245,7 @@ export type ReviewStartPayload = {
 
 export type ReviewRespondPayload = {
   session_id: string;
+  interview_language?: InterviewLanguage;
   input_text?: string;
   voice_url?: string;
   transcript_text?: string;

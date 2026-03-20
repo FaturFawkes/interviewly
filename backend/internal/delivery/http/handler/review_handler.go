@@ -11,22 +11,24 @@ import (
 )
 
 type startReviewRequest struct {
-	SessionType     string `json:"session_type"`
-	InputMode       string `json:"input_mode"`
-	InputText       string `json:"input_text"`
-	VoiceURL        string `json:"voice_url"`
-	TranscriptText  string `json:"transcript_text"`
-	InterviewPrompt string `json:"interview_prompt"`
-	TargetRole      string `json:"target_role"`
-	TargetCompany   string `json:"target_company"`
+	SessionType       string `json:"session_type"`
+	InputMode         string `json:"input_mode"`
+	InterviewLanguage string `json:"interview_language"`
+	InputText         string `json:"input_text"`
+	VoiceURL          string `json:"voice_url"`
+	TranscriptText    string `json:"transcript_text"`
+	InterviewPrompt   string `json:"interview_prompt"`
+	TargetRole        string `json:"target_role"`
+	TargetCompany     string `json:"target_company"`
 }
 
 type respondReviewRequest struct {
-	SessionID       string `json:"session_id" binding:"required"`
-	InputText       string `json:"input_text"`
-	VoiceURL        string `json:"voice_url"`
-	TranscriptText  string `json:"transcript_text"`
-	InterviewPrompt string `json:"interview_prompt"`
+	SessionID         string `json:"session_id" binding:"required"`
+	InterviewLanguage string `json:"interview_language"`
+	InputText         string `json:"input_text"`
+	VoiceURL          string `json:"voice_url"`
+	TranscriptText    string `json:"transcript_text"`
+	InterviewPrompt   string `json:"interview_prompt"`
 }
 
 type endReviewRequest struct {
@@ -62,14 +64,15 @@ func (h *ReviewHandler) StartReview(c *gin.Context) {
 	}
 
 	session, err := h.interviewUC.StartReviewSession(userID, domain.ReviewStartInput{
-		SessionType:     req.SessionType,
-		InputMode:       req.InputMode,
-		InputText:       req.InputText,
-		VoiceURL:        req.VoiceURL,
-		TranscriptText:  req.TranscriptText,
-		InterviewPrompt: req.InterviewPrompt,
-		TargetRole:      req.TargetRole,
-		TargetCompany:   req.TargetCompany,
+		SessionType:       req.SessionType,
+		InputMode:         req.InputMode,
+		InterviewLanguage: req.InterviewLanguage,
+		InputText:         req.InputText,
+		VoiceURL:          req.VoiceURL,
+		TranscriptText:    req.TranscriptText,
+		InterviewPrompt:   req.InterviewPrompt,
+		TargetRole:        req.TargetRole,
+		TargetCompany:     req.TargetCompany,
 	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -111,11 +114,12 @@ func (h *ReviewHandler) RespondReview(c *gin.Context) {
 	}
 
 	session, err := h.interviewUC.RespondReviewSession(userID, domain.ReviewRespondInput{
-		SessionID:       req.SessionID,
-		InputText:       req.InputText,
-		VoiceURL:        req.VoiceURL,
-		TranscriptText:  req.TranscriptText,
-		InterviewPrompt: req.InterviewPrompt,
+		SessionID:         req.SessionID,
+		InterviewLanguage: req.InterviewLanguage,
+		InputText:         req.InputText,
+		VoiceURL:          req.VoiceURL,
+		TranscriptText:    req.TranscriptText,
+		InterviewPrompt:   req.InterviewPrompt,
 	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

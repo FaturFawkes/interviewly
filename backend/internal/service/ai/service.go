@@ -542,6 +542,9 @@ func (s *Service) AnalyzeReview(input domain.ReviewAIInput) (*domain.ReviewAIFee
 	if strings.TrimSpace(input.UserInput) == "" {
 		return nil, fmt.Errorf("review input is required")
 	}
+	reviewLanguage := resolveReviewLanguage(input.InterviewLanguage, input.Memory.PreferredLanguage)
+	input.InterviewLanguage = reviewLanguage
+	isIndonesian := reviewLanguage == domain.InterviewLanguageIndonesian
 
 	if s.useRemoteProvider() {
 		if remote, err := s.remoteAnalyzeReview(input); err == nil {
@@ -558,47 +561,94 @@ func (s *Service) AnalyzeReview(input domain.ReviewAIInput) (*domain.ReviewAIFee
 	strengths := []string{"you are self-aware about the interview outcome"}
 	weaknesses := []string{}
 	suggestions := []string{}
+	if isIndonesian {
+		strengths = []string{"Anda cukup sadar diri terhadap hasil interview Anda"}
+	}
 
 	if containsAny(normalized, []string{"result", "impact", "%", "improved", "increased", "decreased", "dampak", "hasil"}) {
 		score += 12
 		structure += 8
-		strengths = append(strengths, "you mentioned outcomes, not only activities")
+		if isIndonesian {
+			strengths = append(strengths, "Anda menyebutkan hasil, bukan hanya aktivitas")
+		} else {
+			strengths = append(strengths, "you mentioned outcomes, not only activities")
+		}
 	} else {
-		weaknesses = append(weaknesses, "your story lacks measurable outcomes")
-		suggestions = append(suggestions, "add one concrete metric for each key example")
+		if isIndonesian {
+			weaknesses = append(weaknesses, "cerita Anda belum memiliki hasil yang terukur")
+			suggestions = append(suggestions, "tambahkan satu metrik konkret untuk setiap contoh utama")
+		} else {
+			weaknesses = append(weaknesses, "your story lacks measurable outcomes")
+			suggestions = append(suggestions, "add one concrete metric for each key example")
+		}
 	}
 
 	if containsAny(normalized, []string{"situation", "task", "action", "result", "star"}) {
 		score += 14
 		structure += 18
-		strengths = append(strengths, "your answer has recognizable STAR structure")
+		if isIndonesian {
+			strengths = append(strengths, "jawaban Anda memiliki struktur STAR yang jelas")
+		} else {
+			strengths = append(strengths, "your answer has recognizable STAR structure")
+		}
 	} else {
-		weaknesses = append(weaknesses, "answer structure is unclear")
-		suggestions = append(suggestions, "use STAR order: context, action, measurable result")
+		if isIndonesian {
+			weaknesses = append(weaknesses, "struktur jawaban masih kurang jelas")
+			suggestions = append(suggestions, "gunakan urutan STAR: konteks, aksi, hasil terukur")
+		} else {
+			weaknesses = append(weaknesses, "answer structure is unclear")
+			suggestions = append(suggestions, "use STAR order: context, action, measurable result")
+		}
 	}
 
 	if containsAny(normalized, []string{"umm", "maybe", "not sure", "kayaknya", "mungkin", "gak yakin"}) {
 		confidence -= 12
-		weaknesses = append(weaknesses, "confidence signal sounds hesitant")
-		suggestions = append(suggestions, "replace hedging words with decisive phrasing")
+		if isIndonesian {
+			weaknesses = append(weaknesses, "sinyal percaya diri terdengar ragu-ragu")
+			suggestions = append(suggestions, "ganti kata-kata ragu dengan kalimat yang lebih tegas")
+		} else {
+			weaknesses = append(weaknesses, "confidence signal sounds hesitant")
+			suggestions = append(suggestions, "replace hedging words with decisive phrasing")
+		}
 	} else {
 		confidence += 10
-		strengths = append(strengths, "your tone reads reasonably confident")
+		if isIndonesian {
+			strengths = append(strengths, "tone jawaban Anda terdengar cukup percaya diri")
+		} else {
+			strengths = append(strengths, "your tone reads reasonably confident")
+		}
 	}
 
 	if containsAny(normalized, []string{"because", "therefore", "so that", "karena", "sehingga"}) {
 		communication += 12
-		strengths = append(strengths, "your reasoning chain is visible")
+		if isIndonesian {
+			strengths = append(strengths, "alur alasan di jawaban Anda terlihat jelas")
+		} else {
+			strengths = append(strengths, "your reasoning chain is visible")
+		}
 	} else {
-		weaknesses = append(weaknesses, "reasoning behind decisions is under-explained")
-		suggestions = append(suggestions, "explicitly explain why you chose each action")
+		if isIndonesian {
+			weaknesses = append(weaknesses, "alasan di balik keputusan belum dijelaskan dengan cukup")
+			suggestions = append(suggestions, "jelaskan secara eksplisit kenapa Anda memilih tiap aksi")
+		} else {
+			weaknesses = append(weaknesses, "reasoning behind decisions is under-explained")
+			suggestions = append(suggestions, "explicitly explain why you chose each action")
+		}
 	}
 
 	if len(weaknesses) == 0 {
-		weaknesses = append(weaknesses, "there is room to sharpen clarity and brevity")
+		if isIndonesian {
+			weaknesses = append(weaknesses, "masih ada ruang untuk meningkatkan kejelasan dan keringkasan")
+		} else {
+			weaknesses = append(weaknesses, "there is room to sharpen clarity and brevity")
+		}
 	}
 	if len(suggestions) == 0 {
-		suggestions = append(suggestions, "tighten your opening in 2 sentences before deep details")
+		if isIndonesian {
+			suggestions = append(suggestions, "rapikan pembuka dalam 2 kalimat sebelum masuk detail")
+		} else {
+			suggestions = append(suggestions, "tighten your opening in 2 sentences before deep details")
+		}
 	}
 
 	score = clampScore(score)
@@ -607,8 +657,19 @@ func (s *Service) AnalyzeReview(input domain.ReviewAIInput) (*domain.ReviewAIFee
 	confidence = clampScore(confidence)
 
 	betterAnswer := "Use this pattern: 'In my previous role, I faced [Situation]. My goal was [Task]. I took [Action 1, 2]. As a result, we achieved [quantified Result]. If repeated, I would improve by [next step].'"
+	insight := "Your main opportunity is to improve structure and quantified impact so interviewers can trust your execution level faster."
+	followUpQuestion := "Which part of your original answer felt weakest to you: context, action depth, or measurable result?"
+	if isIndonesian {
+		betterAnswer = "Gunakan pola ini: 'Di peran sebelumnya, saya menghadapi [Situasi]. Target saya adalah [Tugas]. Saya melakukan [Aksi 1, 2]. Hasilnya, kami mencapai [Result terukur]. Jika diulang, saya akan meningkatkan [langkah berikutnya].'"
+		insight = "Peluang terbesar Anda adalah memperkuat struktur dan dampak terukur agar interviewer lebih cepat percaya pada level eksekusi Anda."
+		followUpQuestion = "Bagian mana dari jawaban Anda yang paling lemah: konteks, kedalaman aksi, atau hasil terukur?"
+	}
 	if strings.TrimSpace(input.InterviewPrompt) != "" {
-		betterAnswer = fmt.Sprintf("For the question '%s', start with context in one sentence, then 2-3 concrete actions you personally took, and close with a measurable result and lesson learned.", strings.TrimSpace(input.InterviewPrompt))
+		if isIndonesian {
+			betterAnswer = fmt.Sprintf("Untuk pertanyaan '%s', mulai dengan konteks dalam satu kalimat, lalu jelaskan 2-3 aksi konkret yang Anda lakukan sendiri, dan tutup dengan hasil terukur serta pelajaran yang Anda dapat.", strings.TrimSpace(input.InterviewPrompt))
+		} else {
+			betterAnswer = fmt.Sprintf("For the question '%s', start with context in one sentence, then 2-3 concrete actions you personally took, and close with a measurable result and lesson learned.", strings.TrimSpace(input.InterviewPrompt))
+		}
 	}
 
 	return &domain.ReviewAIFeedback{
@@ -620,8 +681,8 @@ func (s *Service) AnalyzeReview(input domain.ReviewAIInput) (*domain.ReviewAIFee
 		Weaknesses:       weaknesses,
 		Suggestions:      suggestions,
 		BetterAnswer:     betterAnswer,
-		Insight:          "Your main opportunity is to improve structure and quantified impact so interviewers can trust your execution level faster.",
-		FollowUpQuestion: "Which part of your original answer felt weakest to you: context, action depth, or measurable result?",
+		Insight:          insight,
+		FollowUpQuestion: followUpQuestion,
 	}, nil
 }
 
@@ -1517,11 +1578,20 @@ func looksLikeEnglishResumeAnalysis(analysis *domain.ResumeAIAnalysis) bool {
 }
 
 func (s *Service) remoteAnalyzeReview(input domain.ReviewAIInput) (*domain.ReviewAIFeedback, error) {
+	reviewLanguage := resolveReviewLanguage(input.InterviewLanguage, input.Memory.PreferredLanguage)
+	input.InterviewLanguage = reviewLanguage
+
 	systemPrompt := "You are a senior AI Career Coach in Review Mode. You must be specific, actionable, and non-generic. Always produce strict JSON only. If information is missing, ask one follow-up question."
+	languageInstruction := "Return every text field in English."
+	if reviewLanguage == domain.InterviewLanguageIndonesian {
+		languageInstruction = "Kembalikan semua field teks dalam Bahasa Indonesia."
+	}
 	userPrompt := fmt.Sprintf(
-		"Analyze this interview reflection and return JSON with keys: score (0-100 int), communication (0-100 int), structure_star (0-100 int), confidence (0-100 int), strengths (array), weaknesses (array), suggestions (array), better_answer (string), insight (string), follow_up_question (string), recovery_simulation (string optional). Focus on why the candidate likely failed and what to improve next. Session type: %s. Input mode: %s. Target role: %s. Target company: %s. Memory weaknesses: %v. Memory focus areas: %v. Interview prompt/context: %s. Candidate reflection: %s",
+		"Analyze this interview reflection and return JSON with keys: score (0-100 int), communication (0-100 int), structure_star (0-100 int), confidence (0-100 int), strengths (array), weaknesses (array), suggestions (array), better_answer (string), insight (string), follow_up_question (string), recovery_simulation (string optional). Focus on why the candidate likely failed and what to improve next. %s Session type: %s. Input mode: %s. Interview language: %s. Target role: %s. Target company: %s. Memory weaknesses: %v. Memory focus areas: %v. Interview prompt/context: %s. Candidate reflection: %s",
+		languageInstruction,
 		input.SessionType,
 		input.InputMode,
+		string(reviewLanguage),
 		input.TargetRole,
 		input.TargetCompany,
 		input.Memory.Weaknesses,
@@ -1554,10 +1624,24 @@ func (s *Service) remoteAnalyzeReview(input domain.ReviewAIInput) (*domain.Revie
 		result.Suggestions = []string{"add one measurable result and explicit action ownership"}
 	}
 	if strings.TrimSpace(result.FollowUpQuestion) == "" {
-		result.FollowUpQuestion = "What exact interviewer question do you want to re-answer now?"
+		if reviewLanguage == domain.InterviewLanguageIndonesian {
+			result.FollowUpQuestion = "Pertanyaan interviewer yang mana yang ingin Anda jawab ulang sekarang?"
+		} else {
+			result.FollowUpQuestion = "What exact interviewer question do you want to re-answer now?"
+		}
 	}
 
 	return &result, nil
+}
+
+func resolveReviewLanguage(selected domain.InterviewLanguage, preferred string) domain.InterviewLanguage {
+	if strings.TrimSpace(string(selected)) != "" {
+		return domain.NormalizeInterviewLanguage(string(selected))
+	}
+	if strings.TrimSpace(preferred) != "" {
+		return domain.NormalizeInterviewLanguage(preferred)
+	}
+	return domain.InterviewLanguageEnglish
 }
 
 func (s *Service) remoteGenerateImprovementPlan(history []domain.ReviewSession, memory domain.CoachingMemory) (*domain.ImprovementPlan, error) {

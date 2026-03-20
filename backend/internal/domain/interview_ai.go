@@ -49,13 +49,14 @@ type ResumeAnalysisRecord struct {
 
 // ReviewAIInput represents one coaching turn context for review mode.
 type ReviewAIInput struct {
-	SessionType     string         `json:"session_type"`
-	InputMode       string         `json:"input_mode"`
-	UserInput       string         `json:"user_input"`
-	InterviewPrompt string         `json:"interview_prompt,omitempty"`
-	TargetRole      string         `json:"target_role,omitempty"`
-	TargetCompany   string         `json:"target_company,omitempty"`
-	Memory          CoachingMemory `json:"memory"`
+	SessionType       string            `json:"session_type"`
+	InputMode         string            `json:"input_mode"`
+	InterviewLanguage InterviewLanguage `json:"interview_language"`
+	UserInput         string            `json:"user_input"`
+	InterviewPrompt   string            `json:"interview_prompt,omitempty"`
+	TargetRole        string            `json:"target_role,omitempty"`
+	TargetCompany     string            `json:"target_company,omitempty"`
+	Memory            CoachingMemory    `json:"memory"`
 }
 
 // ReviewAIFeedback is structured coaching output for review mode.
