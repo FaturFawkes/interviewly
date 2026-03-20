@@ -13,4 +13,4 @@ ALTER TABLE app_usage_tracking
 
 ALTER TABLE app_usage_tracking
     ADD CONSTRAINT app_usage_tracking_usage_type_check
-    CHECK (usage_type IN ('voice_minutes', 'session_count', 'voice_addon'));
+    CHECK (usage_type IN ('voice_minutes', 'session_count', 'text_request', 'jd_parse', 'voice_topup'));

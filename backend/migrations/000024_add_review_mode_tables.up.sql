@@ -3,7 +3,16 @@ ALTER TABLE app_usage_tracking
 
 ALTER TABLE app_usage_tracking
     ADD CONSTRAINT app_usage_tracking_usage_type_check
-    CHECK (usage_type IN ('voice_minutes', 'session_count', 'voice_addon', 'review_count', 'review_voice_minutes'));
+    CHECK (usage_type IN (
+        'voice_minutes',
+        'session_count',
+        'voice_addon',
+        'text_request',
+        'jd_parse',
+        'voice_topup',
+        'review_count',
+        'review_voice_minutes'
+    ));
 
 CREATE TABLE IF NOT EXISTS app_review_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

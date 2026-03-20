@@ -167,8 +167,8 @@ Implementasi berada di:
 
 Migration baru:
 
-- `backend/migrations/000022_add_review_mode_tables.up.sql`
-- `backend/migrations/000022_add_review_mode_tables.down.sql`
+- `backend/migrations/000024_add_review_mode_tables.up.sql`
+- `backend/migrations/000024_add_review_mode_tables.down.sql`
 
 Tabel baru:
 
