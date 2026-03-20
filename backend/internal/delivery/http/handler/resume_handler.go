@@ -13,7 +13,8 @@ import (
 )
 
 type saveResumeRequest struct {
-	Content string `json:"content"`
+	Content  string `json:"content"`
+	Language string `json:"language"`
 }
 
 // ResumeHandler handles resume-related APIs.
@@ -90,6 +91,28 @@ func (h *ResumeHandler) AnalyzeResume(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// GetLatestResumeAnalysis handles GET /api/resume/analysis/latest.
+func (h *ResumeHandler) GetLatestResumeAnalysis(c *gin.Context) {
+	userID, ok := extractUserID(c)
+	if !ok {
+		return
+	}
+
+	language := strings.TrimSpace(c.Query("language"))
+	analysis, err := h.interviewUC.GetLatestResumeAnalysis(userID, language)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if analysis == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "resume analysis not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, analysis)
+}
+
 // DownloadLatestResume handles GET /api/resume/download.
 func (h *ResumeHandler) DownloadLatestResume(c *gin.Context) {
 	userID, ok := extractUserID(c)
@@ -129,7 +152,8 @@ func (h *ResumeHandler) DownloadLatestResume(c *gin.Context) {
 func parseResumeUpload(c *gin.Context) (domain.ResumeUpload, error) {
 	if strings.HasPrefix(strings.ToLower(c.GetHeader("Content-Type")), "multipart/form-data") {
 		upload := domain.ResumeUpload{
-			Content: strings.TrimSpace(c.PostForm("content")),
+			Content:  strings.TrimSpace(c.PostForm("content")),
+			Language: strings.TrimSpace(c.PostForm("language")),
 		}
 
 		fileHeader, err := c.FormFile("file")
@@ -166,7 +190,7 @@ func parseResumeUpload(c *gin.Context) (domain.ResumeUpload, error) {
 		return domain.ResumeUpload{}, err
 	}
 
-	return domain.ResumeUpload{Content: req.Content}, nil
+	return domain.ResumeUpload{Content: req.Content, Language: req.Language}, nil
 }
 
 func extractUserID(c *gin.Context) (string, bool) {

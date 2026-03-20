@@ -449,7 +449,7 @@ function SetupForm({
   const [targetRole, setTargetRole] = useState("");
   const [targetCompany, setTargetCompany] = useState("");
   const [interviewMode, setInterviewMode] = useState<InterviewMode>("text");
-  const [interviewLanguage, setInterviewLanguage] = useState<InterviewLanguage>("en");
+  const [interviewLanguage, setInterviewLanguage] = useState<InterviewLanguage>("id");
   const [interviewDifficulty, setInterviewDifficulty] = useState<InterviewDifficulty>("medium");
 
   return (

@@ -20,6 +20,7 @@ type interviewRepository struct {
 	mu               sync.RWMutex
 	parsedJobs       map[string]*domain.ParsedJobDescription
 	resumes          map[string]*domain.ResumeRecord
+	resumeAnalyses   map[string]domain.ResumeAnalysisRecord
 	questions        map[string]domain.StoredQuestion
 	sessions         map[string]domain.PracticeSession
 	answers          map[string]domain.SessionAnswer
@@ -36,6 +37,7 @@ func NewInterviewRepository(pool *pgxpool.Pool) domain.InterviewRepository {
 		pool:             pool,
 		parsedJobs:       make(map[string]*domain.ParsedJobDescription),
 		resumes:          make(map[string]*domain.ResumeRecord),
+		resumeAnalyses:   make(map[string]domain.ResumeAnalysisRecord),
 		questions:        make(map[string]domain.StoredQuestion),
 		sessions:         make(map[string]domain.PracticeSession),
 		answers:          make(map[string]domain.SessionAnswer),
@@ -88,11 +90,16 @@ func (r *interviewRepository) SaveParsedJob(userID, rawDescription string, insig
 }
 
 func (r *interviewRepository) SaveResume(userID, content string) (*domain.ResumeRecord, error) {
+	return r.SaveResumeWithFilePath(userID, content, "")
+}
+
+func (r *interviewRepository) SaveResumeWithFilePath(userID, content, filePath string) (*domain.ResumeRecord, error) {
 	now := time.Now().UTC()
 	resume := &domain.ResumeRecord{
 		ID:        uuid.NewString(),
 		UserID:    userID,
 		Content:   content,
+		MinIOPath: strings.TrimSpace(filePath),
 		CreatedAt: now,
 	}
 
@@ -103,12 +110,13 @@ func (r *interviewRepository) SaveResume(userID, content string) (*domain.Resume
 		_, err := r.pool.Exec(
 			ctx,
 			`INSERT INTO app_resumes
-				(id, user_id, content, created_at)
+				(id, user_id, content, minio_path, created_at)
 			 VALUES
-				($1, $2, $3, $4)`,
+				($1, $2, $3, $4, $5)`,
 			resume.ID,
 			resume.UserID,
 			resume.Content,
+			resume.MinIOPath,
 			resume.CreatedAt,
 		)
 		if err == nil {
@@ -130,16 +138,18 @@ func (r *interviewRepository) GetLatestResume(userID string) (*domain.ResumeReco
 		var resume domain.ResumeRecord
 		err := r.pool.QueryRow(
 			ctx,
-			`SELECT id, user_id, content, created_at
+			`SELECT id, user_id, content, minio_path, created_at
 			   FROM app_resumes
 			  WHERE user_id = $1
-			  ORDER BY created_at DESC
+			    AND NULLIF(BTRIM(content), '') IS NOT NULL
+			  ORDER BY created_at DESC, id DESC
 			  LIMIT 1`,
 			userID,
 		).Scan(
 			&resume.ID,
 			&resume.UserID,
 			&resume.Content,
+			&resume.MinIOPath,
 			&resume.CreatedAt,
 		)
 		if err == nil {
@@ -158,8 +168,275 @@ func (r *interviewRepository) GetLatestResume(userID string) (*domain.ResumeReco
 		if resume.UserID != userID {
 			continue
 		}
+		if strings.TrimSpace(resume.Content) == "" {
+			continue
+		}
 		if latest == nil || resume.CreatedAt.After(latest.CreatedAt) {
 			copy := *resume
+			latest = &copy
+		}
+	}
+
+	return latest, nil
+}
+
+func (r *interviewRepository) SaveResumeAnalysis(userID, resumeID, contentHash, model string, analysis *domain.ResumeAIAnalysis) (*domain.ResumeAnalysisRecord, error) {
+	now := time.Now().UTC()
+	record := &domain.ResumeAnalysisRecord{
+		ID:              uuid.NewString(),
+		UserID:          strings.TrimSpace(userID),
+		ResumeID:        strings.TrimSpace(resumeID),
+		ContentHash:     strings.TrimSpace(contentHash),
+		Model:           strings.TrimSpace(model),
+		Summary:         strings.TrimSpace(analysis.Summary),
+		Response:        strings.TrimSpace(analysis.Response),
+		Highlights:      append([]string{}, analysis.Highlights...),
+		Recommendations: append([]string{}, analysis.Recommendations...),
+		CreatedAt:       now,
+	}
+
+	rawResponse, marshalErr := json.Marshal(analysis)
+	if marshalErr != nil {
+		rawResponse = []byte("{}")
+	}
+	record.RawResponse = string(rawResponse)
+
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var scanned domain.ResumeAnalysisRecord
+		var rawJSON []byte
+		err := r.pool.QueryRow(
+			ctx,
+			`INSERT INTO app_resume_analyses
+				(id, user_id, resume_id, content_hash, model, summary, response, highlights, recommendations, raw_response, created_at)
+			 VALUES
+				($1, $2, NULLIF($3, '')::uuid, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
+			 ON CONFLICT (user_id, content_hash, model)
+			 DO UPDATE SET
+				resume_id = NULLIF(EXCLUDED.resume_id::text, '')::uuid,
+				summary = EXCLUDED.summary,
+				response = EXCLUDED.response,
+				highlights = EXCLUDED.highlights,
+				recommendations = EXCLUDED.recommendations,
+				raw_response = EXCLUDED.raw_response,
+				created_at = NOW()
+			 RETURNING id, user_id, COALESCE(resume_id::text, ''), content_hash, model, summary, response, highlights, recommendations, raw_response, created_at`,
+			record.ID,
+			record.UserID,
+			record.ResumeID,
+			record.ContentHash,
+			record.Model,
+			record.Summary,
+			record.Response,
+			record.Highlights,
+			record.Recommendations,
+			record.RawResponse,
+			record.CreatedAt,
+		).Scan(
+			&scanned.ID,
+			&scanned.UserID,
+			&scanned.ResumeID,
+			&scanned.ContentHash,
+			&scanned.Model,
+			&scanned.Summary,
+			&scanned.Response,
+			&scanned.Highlights,
+			&scanned.Recommendations,
+			&rawJSON,
+			&scanned.CreatedAt,
+		)
+		if err == nil {
+			scanned.RawResponse = string(rawJSON)
+			return &scanned, nil
+		}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for id, existing := range r.resumeAnalyses {
+		if existing.UserID == record.UserID && existing.ContentHash == record.ContentHash && existing.Model == record.Model {
+			record.ID = id
+			break
+		}
+	}
+
+	r.resumeAnalyses[record.ID] = *record
+	copy := *record
+	return &copy, nil
+}
+
+func (r *interviewRepository) FindResumeAnalysisByHash(userID, contentHash, model string) (*domain.ResumeAnalysisRecord, error) {
+	userID = strings.TrimSpace(userID)
+	contentHash = strings.TrimSpace(contentHash)
+	model = strings.TrimSpace(model)
+
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var record domain.ResumeAnalysisRecord
+		var rawJSON []byte
+		err := r.pool.QueryRow(
+			ctx,
+			`SELECT id, user_id, COALESCE(resume_id::text, ''), content_hash, model, summary, response, highlights, recommendations, raw_response, created_at
+			   FROM app_resume_analyses
+			  WHERE user_id = $1 AND content_hash = $2 AND model = $3
+			  LIMIT 1`,
+			userID,
+			contentHash,
+			model,
+		).Scan(
+			&record.ID,
+			&record.UserID,
+			&record.ResumeID,
+			&record.ContentHash,
+			&record.Model,
+			&record.Summary,
+			&record.Response,
+			&record.Highlights,
+			&record.Recommendations,
+			&rawJSON,
+			&record.CreatedAt,
+		)
+		if err == nil {
+			record.RawResponse = string(rawJSON)
+			return &record, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, record := range r.resumeAnalyses {
+		if record.UserID == userID && record.ContentHash == contentHash && record.Model == model {
+			copy := record
+			return &copy, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func (r *interviewRepository) GetLatestResumeAnalysis(userID string) (*domain.ResumeAnalysisRecord, error) {
+	userID = strings.TrimSpace(userID)
+
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var record domain.ResumeAnalysisRecord
+		var rawJSON []byte
+		err := r.pool.QueryRow(
+			ctx,
+			`SELECT id, user_id, COALESCE(resume_id::text, ''), content_hash, model, summary, response, highlights, recommendations, raw_response, created_at
+			   FROM app_resume_analyses
+			  WHERE user_id = $1
+			  ORDER BY created_at DESC
+			  LIMIT 1`,
+			userID,
+		).Scan(
+			&record.ID,
+			&record.UserID,
+			&record.ResumeID,
+			&record.ContentHash,
+			&record.Model,
+			&record.Summary,
+			&record.Response,
+			&record.Highlights,
+			&record.Recommendations,
+			&rawJSON,
+			&record.CreatedAt,
+		)
+		if err == nil {
+			record.RawResponse = string(rawJSON)
+			return &record, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var latest *domain.ResumeAnalysisRecord
+	for _, record := range r.resumeAnalyses {
+		if record.UserID != userID {
+			continue
+		}
+		if latest == nil || record.CreatedAt.After(latest.CreatedAt) {
+			copy := record
+			latest = &copy
+		}
+	}
+
+	return latest, nil
+}
+
+func (r *interviewRepository) GetLatestResumeAnalysisByLanguage(userID, language string) (*domain.ResumeAnalysisRecord, error) {
+	userID = strings.TrimSpace(userID)
+	language = strings.TrimSpace(strings.ToLower(language))
+	if language == "" {
+		language = "en"
+	}
+	modelSuffix := "|lang:" + language
+
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var record domain.ResumeAnalysisRecord
+		var rawJSON []byte
+		err := r.pool.QueryRow(
+			ctx,
+			`SELECT id, user_id, COALESCE(resume_id::text, ''), content_hash, model, summary, response, highlights, recommendations, raw_response, created_at
+			   FROM app_resume_analyses
+			  WHERE user_id = $1
+			    AND model LIKE $2
+			  ORDER BY created_at DESC
+			  LIMIT 1`,
+			userID,
+			"%"+modelSuffix,
+		).Scan(
+			&record.ID,
+			&record.UserID,
+			&record.ResumeID,
+			&record.ContentHash,
+			&record.Model,
+			&record.Summary,
+			&record.Response,
+			&record.Highlights,
+			&record.Recommendations,
+			&rawJSON,
+			&record.CreatedAt,
+		)
+		if err == nil {
+			record.RawResponse = string(rawJSON)
+			return &record, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var latest *domain.ResumeAnalysisRecord
+	for _, record := range r.resumeAnalyses {
+		if record.UserID != userID {
+			continue
+		}
+		if !strings.Contains(strings.ToLower(record.Model), modelSuffix) {
+			continue
+		}
+		if latest == nil || record.CreatedAt.After(latest.CreatedAt) {
+			copy := record
 			latest = &copy
 		}
 	}

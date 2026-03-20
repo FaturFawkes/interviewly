@@ -48,6 +48,7 @@ func Setup(
 	writeLimited.POST("/resume", resumeHandler.SaveResume)
 	api.GET("/resume", resumeHandler.GetLatestResume)
 	writeLimited.POST("/resume/analyze", resumeHandler.AnalyzeResume)
+	api.GET("/resume/analysis/latest", resumeHandler.GetLatestResumeAnalysis)
 	api.GET("/resume/download", resumeHandler.DownloadLatestResume)
 	writeLimited.POST("/questions/generate", questionHandler.GenerateQuestions)
 	writeLimited.POST("/voice/tts", voiceHandler.TextToSpeech)

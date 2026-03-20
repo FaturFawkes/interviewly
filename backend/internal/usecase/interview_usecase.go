@@ -1,6 +1,9 @@
 package usecase
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"math"
 	"sort"
@@ -14,14 +17,21 @@ import (
 type interviewUseCase struct {
 	aiService           domain.AIService
 	repo                domain.InterviewRepository
+	resumeStorage       domain.ResumeFileStorage
 	subscriptionService *subscription.Service
 }
 
 // NewInterviewUseCase creates a usecase for interview business workflows.
-func NewInterviewUseCase(aiService domain.AIService, repo domain.InterviewRepository, subscriptionService *subscription.Service) domain.InterviewUseCase {
+func NewInterviewUseCase(
+	aiService domain.AIService,
+	repo domain.InterviewRepository,
+	resumeStorage domain.ResumeFileStorage,
+	subscriptionService *subscription.Service,
+) domain.InterviewUseCase {
 	return &interviewUseCase{
 		aiService:           aiService,
 		repo:                repo,
+		resumeStorage:       resumeStorage,
 		subscriptionService: subscriptionService,
 	}
 }
@@ -83,7 +93,20 @@ func (uc *interviewUseCase) SaveResume(userID string, upload domain.ResumeUpload
 		return nil, errors.New("resume content is required")
 	}
 
-	return uc.repo.SaveResume(userID, content)
+	storagePath := ""
+	if len(upload.FileData) > 0 {
+		if uc.resumeStorage == nil {
+			return nil, errors.New("resume storage is not configured")
+		}
+
+		uploadedPath, err := uc.resumeStorage.UploadResume(userID, upload.FileName, upload.ContentType, upload.FileData)
+		if err != nil {
+			return nil, err
+		}
+		storagePath = uploadedPath
+	}
+
+	return uc.repo.SaveResumeWithFilePath(userID, content, storagePath)
 }
 
 func (uc *interviewUseCase) GetLatestResume(userID string) (*domain.ResumeRecord, error) {
@@ -99,11 +122,20 @@ func (uc *interviewUseCase) AnalyzeResume(userID string, upload domain.ResumeUpl
 		return nil, errors.New("user id is required")
 	}
 
+	var latestResume *domain.ResumeRecord
 	content := strings.TrimSpace(upload.Content)
 	if content == "" && len(upload.FileData) > 0 {
 		content = strings.TrimSpace(string(upload.FileData))
 	}
-	if content == "" {
+
+	if len(upload.FileData) > 0 || content != "" {
+		savedResume, err := uc.SaveResume(userID, upload)
+		if err != nil {
+			return nil, err
+		}
+		latestResume = savedResume
+		content = strings.TrimSpace(savedResume.Content)
+	} else {
 		latest, err := uc.repo.GetLatestResume(userID)
 		if err != nil {
 			return nil, err
@@ -111,6 +143,7 @@ func (uc *interviewUseCase) AnalyzeResume(userID string, upload domain.ResumeUpl
 		if latest == nil || strings.TrimSpace(latest.Content) == "" {
 			return nil, errors.New("resume content is required")
 		}
+		latestResume = latest
 		content = latest.Content
 	}
 
@@ -120,7 +153,93 @@ func (uc *interviewUseCase) AnalyzeResume(userID string, upload domain.ResumeUpl
 	}
 
 	modelOverride := uc.applyTextFUPDecision(decision)
-	return uc.analyzeResumeWithModel(content, modelOverride)
+	analysisLanguage := normalizeResumeAnalysisLanguage(upload.Language)
+	modelKey := normalizeAnalysisModelKey(modelOverride, analysisLanguage)
+	contentHash := hashResumeContent(content)
+
+	cached, err := uc.repo.FindResumeAnalysisByHash(userID, contentHash, modelKey)
+	if err != nil {
+		return nil, err
+	}
+	if cached != nil {
+		return &domain.ResumeAIAnalysis{
+			Summary:         cached.Summary,
+			Response:        cached.Response,
+			Highlights:      append([]string{}, cached.Highlights...),
+			Recommendations: append([]string{}, cached.Recommendations...),
+		}, nil
+	}
+
+	analysisInput := buildResumeAnalysisInput(content, analysisLanguage)
+	analysis, err := uc.analyzeResumeWithModel(analysisInput, modelOverride)
+	if err != nil {
+		return nil, err
+	}
+
+	analysis = uc.ensureResumeAnalysisLanguage(analysis, analysisLanguage)
+
+	resumeID := ""
+	if latestResume != nil {
+		resumeID = latestResume.ID
+	}
+
+	if _, err := uc.repo.SaveResumeAnalysis(userID, resumeID, contentHash, modelKey, analysis); err != nil {
+		return nil, err
+	}
+
+	return analysis, nil
+}
+
+func (uc *interviewUseCase) GetLatestResumeAnalysis(userID, language string) (*domain.ResumeAIAnalysis, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errors.New("user id is required")
+	}
+
+	analysisLanguage := normalizeResumeAnalysisLanguage(language)
+	record, err := uc.repo.GetLatestResumeAnalysisByLanguage(userID, analysisLanguage)
+	if err != nil {
+		return nil, err
+	}
+	if record == nil {
+		latestRecord, latestErr := uc.repo.GetLatestResumeAnalysis(userID)
+		if latestErr != nil {
+			return nil, latestErr
+		}
+		if latestRecord == nil {
+			return nil, nil
+		}
+
+		translated := resumeAnalysisFromRecord(latestRecord)
+		translated = uc.ensureResumeAnalysisLanguage(translated, analysisLanguage)
+		if translated == nil {
+			return nil, nil
+		}
+
+		_, _ = uc.repo.SaveResumeAnalysis(
+			userID,
+			latestRecord.ResumeID,
+			latestRecord.ContentHash,
+			modelKeyWithLanguage(latestRecord.Model, analysisLanguage),
+			translated,
+		)
+
+		return translated, nil
+	}
+
+	analysis := resumeAnalysisFromRecord(record)
+	adjusted := uc.ensureResumeAnalysisLanguage(analysis, analysisLanguage)
+	if adjusted != nil && !sameResumeAnalysisContent(analysis, adjusted) {
+		_, _ = uc.repo.SaveResumeAnalysis(
+			userID,
+			record.ResumeID,
+			record.ContentHash,
+			modelKeyWithLanguage(record.Model, analysisLanguage),
+			adjusted,
+		)
+		return adjusted, nil
+	}
+
+	return analysis, nil
 }
 
 func (uc *interviewUseCase) DownloadLatestResume(userID string) (*domain.ResumeFile, error) {
@@ -134,6 +253,19 @@ func (uc *interviewUseCase) DownloadLatestResume(userID string) (*domain.ResumeF
 	}
 	if latest == nil || strings.TrimSpace(latest.Content) == "" {
 		return nil, errors.New("no uploaded cv")
+	}
+
+	if strings.TrimSpace(latest.MinIOPath) != "" {
+		if uc.resumeStorage == nil {
+			return nil, errors.New("resume storage is not configured")
+		}
+
+		file, err := uc.resumeStorage.DownloadResume(latest.MinIOPath)
+		if err != nil {
+			return nil, err
+		}
+
+		return file, nil
 	}
 
 	return &domain.ResumeFile{
@@ -863,6 +995,220 @@ func normalizeReviewSessionType(value string) string {
 		return domain.ReviewSessionTypeRecovery
 	}
 	return domain.ReviewSessionTypeStandard
+}
+
+func hashResumeContent(content string) string {
+	normalized := strings.TrimSpace(strings.ToLower(content))
+	sum := sha256.Sum256([]byte(normalized))
+	return hex.EncodeToString(sum[:])
+}
+
+func normalizeAnalysisModelKey(modelOverride, language string) string {
+	trimmed := strings.TrimSpace(modelOverride)
+	if trimmed == "" {
+		trimmed = "default"
+	}
+	return trimmed + "|lang:" + normalizeResumeAnalysisLanguage(language)
+}
+
+func normalizeResumeAnalysisLanguage(value string) string {
+	trimmed := strings.TrimSpace(strings.ToLower(value))
+	if trimmed == string(domain.InterviewLanguageIndonesian) {
+		return string(domain.InterviewLanguageIndonesian)
+	}
+	return string(domain.InterviewLanguageEnglish)
+}
+
+func buildResumeAnalysisInput(content, language string) string {
+	language = normalizeResumeAnalysisLanguage(language)
+	if language == string(domain.InterviewLanguageIndonesian) {
+		return "Please return all output fields in Bahasa Indonesia.\n\n" + content
+	}
+
+	return "Please return all output fields in English.\n\n" + content
+}
+
+func buildResumeAnalysisTranslationInput(analysis *domain.ResumeAIAnalysis, language string) string {
+	language = normalizeResumeAnalysisLanguage(language)
+	encoded, err := json.Marshal(analysis)
+	if err != nil {
+		encoded = []byte(`{"summary":"","response":"","highlights":[],"recommendations":[]}`)
+	}
+
+	if language == string(domain.InterviewLanguageIndonesian) {
+		return "Translate this resume analysis JSON into Bahasa Indonesia. Keep the same meaning, keep it concise, and return all output fields in Bahasa Indonesia.\n\nResume analysis JSON:\n" + string(encoded)
+	}
+
+	return "Translate this resume analysis JSON into English. Keep the same meaning, keep it concise, and return all output fields in English.\n\nResume analysis JSON:\n" + string(encoded)
+}
+
+func (uc *interviewUseCase) translateResumeAnalysisToLanguage(analysis *domain.ResumeAIAnalysis, language string) (*domain.ResumeAIAnalysis, error) {
+	if analysis == nil {
+		return nil, errors.New("analysis is required")
+	}
+
+	translationInput := buildResumeAnalysisTranslationInput(analysis, language)
+	return uc.analyzeResumeWithModel(translationInput, "")
+}
+
+func (uc *interviewUseCase) ensureResumeAnalysisLanguage(analysis *domain.ResumeAIAnalysis, language string) *domain.ResumeAIAnalysis {
+	if analysis == nil {
+		return nil
+	}
+
+	language = normalizeResumeAnalysisLanguage(language)
+	if language == string(domain.InterviewLanguageIndonesian) {
+		if looksLikeIndonesianResumeAnalysis(analysis) {
+			return analysis
+		}
+
+		translated, err := uc.translateResumeAnalysisToLanguage(analysis, language)
+		if err == nil && translated != nil {
+			return translated
+		}
+	}
+
+	if language == string(domain.InterviewLanguageEnglish) {
+		if looksLikeEnglishResumeAnalysis(analysis) {
+			return analysis
+		}
+
+		translated, err := uc.translateResumeAnalysisToLanguage(analysis, language)
+		if err == nil && translated != nil {
+			return translated
+		}
+	}
+
+	return analysis
+}
+
+func looksLikeEnglishResumeAnalysis(analysis *domain.ResumeAIAnalysis) bool {
+	if analysis == nil {
+		return false
+	}
+
+	blob := strings.ToLower(strings.TrimSpace(strings.Join([]string{
+		analysis.Summary,
+		analysis.Response,
+		strings.Join(analysis.Highlights, " "),
+		strings.Join(analysis.Recommendations, " "),
+	}, " ")))
+
+	if blob == "" {
+		return false
+	}
+
+	indicators := []string{
+		"the cv indicates",
+		"overall, the profile",
+		"highlight measurable impact",
+		"tailor headline",
+		"add 2-3 quantified achievements",
+		"leadership outcomes",
+	}
+
+	for _, marker := range indicators {
+		if strings.Contains(blob, marker) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func looksLikeIndonesianResumeAnalysis(analysis *domain.ResumeAIAnalysis) bool {
+	if analysis == nil {
+		return false
+	}
+
+	blob := strings.ToLower(strings.TrimSpace(strings.Join([]string{
+		analysis.Summary,
+		analysis.Response,
+		strings.Join(analysis.Highlights, " "),
+		strings.Join(analysis.Recommendations, " "),
+	}, " ")))
+
+	if blob == "" {
+		return false
+	}
+
+	indicators := []string{
+		"cv ini",
+		"secara keseluruhan",
+		"dampak",
+		"pencapaian",
+		"kepemimpinan",
+		"rekomendasi",
+	}
+
+	for _, marker := range indicators {
+		if strings.Contains(blob, marker) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func sameResumeAnalysisContent(a, b *domain.ResumeAIAnalysis) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+
+	if strings.TrimSpace(a.Summary) != strings.TrimSpace(b.Summary) {
+		return false
+	}
+	if strings.TrimSpace(a.Response) != strings.TrimSpace(b.Response) {
+		return false
+	}
+	if len(a.Highlights) != len(b.Highlights) || len(a.Recommendations) != len(b.Recommendations) {
+		return false
+	}
+
+	for index := range a.Highlights {
+		if strings.TrimSpace(a.Highlights[index]) != strings.TrimSpace(b.Highlights[index]) {
+			return false
+		}
+	}
+	for index := range a.Recommendations {
+		if strings.TrimSpace(a.Recommendations[index]) != strings.TrimSpace(b.Recommendations[index]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func modelKeyWithLanguage(model, language string) string {
+	language = normalizeResumeAnalysisLanguage(language)
+	base := strings.TrimSpace(model)
+	if base == "" {
+		base = "default"
+	}
+
+	lower := strings.ToLower(base)
+	if marker := strings.LastIndex(lower, "|lang:"); marker >= 0 {
+		base = strings.TrimSpace(base[:marker])
+	}
+
+	if base == "" {
+		base = "default"
+	}
+
+	return base + "|lang:" + language
+}
+
+func resumeAnalysisFromRecord(record *domain.ResumeAnalysisRecord) *domain.ResumeAIAnalysis {
+	if record == nil {
+		return nil
+	}
+
+	return &domain.ResumeAIAnalysis{
+		Summary:         record.Summary,
+		Response:        record.Response,
+		Highlights:      append([]string{}, record.Highlights...),
+		Recommendations: append([]string{}, record.Recommendations...),
+	}
 }
 
 func normalizeReviewInputMode(value string) string {

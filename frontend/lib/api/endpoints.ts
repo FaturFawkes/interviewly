@@ -1,4 +1,5 @@
 import { apiRequest } from "@/lib/api/client";
+import { DEFAULT_LOCALE } from "@/lib/i18n";
 import type {
   AgentFeedbackPayload,
   FeedbackRecord,
@@ -35,21 +36,38 @@ export const api = {
       body: { job_description: jobDescription },
     }),
 
-  saveResume: (resumeText: string): Promise<ResumeRecord> =>
+  saveResume: (resumeText: string, language?: "id" | "en"): Promise<ResumeRecord> =>
     apiRequest("/api/resume", {
       method: "POST",
-      body: { content: resumeText },
+      body: { content: resumeText, language: language ?? DEFAULT_LOCALE },
     }),
+
+  saveResumeUpload: (file: File, resumeText: string, language?: "id" | "en"): Promise<ResumeRecord> => {
+    const payload = new FormData();
+    payload.append("file", file);
+    payload.append("content", resumeText);
+    payload.append("language", language ?? DEFAULT_LOCALE);
+
+    return apiRequest("/api/resume", {
+      method: "POST",
+      body: payload,
+    });
+  },
 
   getLatestResume: (): Promise<ResumeRecord> =>
     apiRequest("/api/resume", {
       method: "GET",
     }),
 
-  analyzeResume: (resumeText?: string): Promise<ResumeAIAnalysis> =>
+  getLatestResumeAnalysis: (language?: "id" | "en"): Promise<ResumeAIAnalysis> =>
+    apiRequest(`/api/resume/analysis/latest?language=${language ?? DEFAULT_LOCALE}`, {
+      method: "GET",
+    }),
+
+  analyzeResume: (resumeText?: string, language?: "id" | "en"): Promise<ResumeAIAnalysis> =>
     apiRequest("/api/resume/analyze", {
       method: "POST",
-      body: { content: resumeText ?? "" },
+      body: { content: resumeText ?? "", language: language ?? DEFAULT_LOCALE },
     }),
 
   generateQuestions: (
@@ -182,4 +200,5 @@ export const api = {
         package_code: packageCode,
       },
     }),
+    
 };

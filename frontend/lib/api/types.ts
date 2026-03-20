@@ -17,6 +17,7 @@ export type ResumeRecord = {
   id: string;
   user_id: string;
   content: string;
+  minio_path?: string;
   created_at: string;
 };
 

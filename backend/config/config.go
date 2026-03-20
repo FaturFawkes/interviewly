@@ -40,6 +40,13 @@ type Config struct {
 	ElevenLabsAgentBranchID             string
 	ElevenLabsReviewAgentID             string
 	ElevenLabsReviewAgentBranchID       string
+	SupabaseURL                         string
+	SupabaseS3Endpoint                  string
+	SupabaseS3Region                    string
+	SupabaseS3AccessKeyID               string
+	SupabaseS3SecretAccessKey           string
+	SupabaseStorageBucket               string
+	SupabaseStoragePathPrefix           string
 	MinIOEndpoint                       string
 	MinIOAccessKey                      string
 	MinIOSecretKey                      string
@@ -100,6 +107,13 @@ func Load() *Config {
 		ElevenLabsAgentBranchID:             getEnv("ELEVENLABS_AGENT_BRANCH_ID", ""),
 		ElevenLabsReviewAgentID:             getEnv("ELEVENLABS_REVIEW_AGENT_ID", ""),
 		ElevenLabsReviewAgentBranchID:       getEnv("ELEVENLABS_REVIEW_AGENT_BRANCH_ID", ""),
+		SupabaseURL:                         getEnv("SUPABASE_URL", ""),
+		SupabaseS3Endpoint:                  getEnv("SUPABASE_S3_ENDPOINT", ""),
+		SupabaseS3Region:                    getEnv("SUPABASE_S3_REGION", "us-east-1"),
+		SupabaseS3AccessKeyID:               getEnv("SUPABASE_S3_ACCESS_KEY_ID", ""),
+		SupabaseS3SecretAccessKey:           getEnv("SUPABASE_S3_SECRET_ACCESS_KEY", ""),
+		SupabaseStorageBucket:               getEnv("SUPABASE_STORAGE_BUCKET", "resumes"),
+		SupabaseStoragePathPrefix:           getEnv("SUPABASE_STORAGE_PATH_PREFIX", ""),
 		MinIOEndpoint:                       getEnv("MINIO_ENDPOINT", ""),
 		MinIOAccessKey:                      getEnv("MINIO_ACCESS_KEY", ""),
 		MinIOSecretKey:                      getEnv("MINIO_SECRET_KEY", ""),

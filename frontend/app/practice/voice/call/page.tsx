@@ -40,7 +40,7 @@ const DASHBOARD_REDIRECT_DELAY_MS = 2500;
 const DEFAULT_COMPLETION_POPUP_MESSAGE = "Latihan interview telah selesai dan Anda akan kembali ke halaman dashboard.";
 
 function resolveSessionLanguage(interviewLanguage?: string): "en" | "id" {
-  return interviewLanguage === "id" ? "id" : "en";
+  return interviewLanguage === "en" ? "en" : "id";
 }
 
 function normalizeTranscript(value: string): string {

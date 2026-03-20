@@ -473,6 +473,20 @@ func (s *Service) AnalyzeResume(resumeText string) (*domain.ResumeAIAnalysis, er
 		return nil, fmt.Errorf("resume content is required")
 	}
 
+	if translationRequest, targetLanguage, sourceAnalysis := parseResumeAnalysisTranslationRequest(resumeText); translationRequest {
+		if sourceAnalysis == nil {
+			return nil, fmt.Errorf("resume analysis translation payload is invalid")
+		}
+
+		if s.useRemoteProvider() {
+			if remote, err := s.remoteTranslateResumeAnalysis(sourceAnalysis, targetLanguage); err == nil {
+				return ensureTranslationQuality(sourceAnalysis, remote, targetLanguage), nil
+			}
+		}
+
+		return translateResumeAnalysisLocally(sourceAnalysis, targetLanguage), nil
+	}
+
 	if s.useRemoteProvider() {
 		if remote, err := s.remoteAnalyzeResume(resumeText); err == nil {
 			return remote, nil
@@ -646,6 +660,9 @@ func (s *Service) GenerateImprovementPlan(history []domain.ReviewSession, memory
 		NextSessionFocus: "Answer relevance and stronger action/result details",
 	}, nil
 }
+
+// TranslateText translates short pieces of text into targetLanguage ("id" or "en").
+// TranslateText removed during rollback; prefer client-side Google Translate widget.
 
 func tokenize(input string) []string {
 	r := strings.NewReplacer(
@@ -1202,6 +1219,301 @@ func (s *Service) remoteAnalyzeResumeWithModel(resumeText, modelOverride string)
 	}
 
 	return &result, nil
+}
+
+func (s *Service) remoteTranslateResumeAnalysis(analysis *domain.ResumeAIAnalysis, targetLanguage string) (*domain.ResumeAIAnalysis, error) {
+	targetLanguage = normalizeResumeAnalysisLanguage(targetLanguage)
+	payload, err := json.Marshal(analysis)
+	if err != nil {
+		return nil, err
+	}
+
+	languageLabel := "English"
+	if targetLanguage == "id" {
+		languageLabel = "Bahasa Indonesia"
+	}
+
+	systemPrompt := "You are a translation assistant for interview coaching outputs. Return only strict JSON."
+	userPrompt := fmt.Sprintf(
+		"Translate this resume analysis JSON into %s while preserving meaning and structure. Return JSON with keys summary (string), response (string), highlights (array of strings), recommendations (array of strings).\n\nResume analysis JSON:\n%s",
+		languageLabel,
+		string(payload),
+	)
+
+	raw, err := s.chatCompletion(systemPrompt, userPrompt)
+	if err != nil {
+		return nil, err
+	}
+
+	var result domain.ResumeAIAnalysis
+	if err := extractJSONObject(raw, &result); err != nil {
+		return nil, err
+	}
+
+	if strings.TrimSpace(result.Summary) == "" {
+		result.Summary = analysis.Summary
+	}
+	if strings.TrimSpace(result.Response) == "" {
+		result.Response = analysis.Response
+	}
+	if len(result.Highlights) == 0 {
+		result.Highlights = append([]string{}, analysis.Highlights...)
+	}
+	if len(result.Recommendations) == 0 {
+		result.Recommendations = append([]string{}, analysis.Recommendations...)
+	}
+
+	return ensureTranslationQuality(analysis, &result, targetLanguage), nil
+}
+
+func parseResumeAnalysisTranslationRequest(input string) (bool, string, *domain.ResumeAIAnalysis) {
+	trimmed := strings.TrimSpace(input)
+	lower := strings.ToLower(trimmed)
+	if !strings.Contains(lower, "resume analysis json") {
+		return false, "", nil
+	}
+
+	targetLanguage := "en"
+	if strings.Contains(lower, "bahasa indonesia") {
+		targetLanguage = "id"
+	}
+
+	markerIndex := strings.Index(lower, "resume analysis json")
+	if markerIndex < 0 {
+		return true, targetLanguage, nil
+	}
+
+	payloadSection := strings.TrimSpace(trimmed[markerIndex+len("resume analysis json"):])
+	payloadSection = strings.TrimLeft(payloadSection, ": \n\t")
+
+	jsonStart := strings.Index(payloadSection, "{")
+	jsonEnd := strings.LastIndex(payloadSection, "}")
+	if jsonStart < 0 || jsonEnd < jsonStart {
+		return true, targetLanguage, nil
+	}
+
+	jsonPayload := payloadSection[jsonStart : jsonEnd+1]
+
+	var analysis domain.ResumeAIAnalysis
+	if err := json.Unmarshal([]byte(jsonPayload), &analysis); err != nil {
+		return true, targetLanguage, nil
+	}
+
+	return true, targetLanguage, &analysis
+}
+
+func translateResumeAnalysisLocally(analysis *domain.ResumeAIAnalysis, targetLanguage string) *domain.ResumeAIAnalysis {
+	targetLanguage = normalizeResumeAnalysisLanguage(targetLanguage)
+	if analysis == nil {
+		return &domain.ResumeAIAnalysis{}
+	}
+
+	if targetLanguage == "id" {
+		highlights := make([]string, 0, len(analysis.Highlights))
+		for _, item := range analysis.Highlights {
+			highlights = append(highlights, translateTextToIndonesian(item))
+		}
+
+		recommendations := make([]string, 0, len(analysis.Recommendations))
+		for _, item := range analysis.Recommendations {
+			recommendations = append(recommendations, translateTextToIndonesian(item))
+		}
+
+		return &domain.ResumeAIAnalysis{
+			Summary:         translateTextToIndonesian(analysis.Summary),
+			Response:        translateTextToIndonesian(analysis.Response),
+			Highlights:      highlights,
+			Recommendations: recommendations,
+		}
+	}
+
+	highlights := make([]string, 0, len(analysis.Highlights))
+	for _, item := range analysis.Highlights {
+		highlights = append(highlights, translateTextToEnglish(item))
+	}
+
+	recommendations := make([]string, 0, len(analysis.Recommendations))
+	for _, item := range analysis.Recommendations {
+		recommendations = append(recommendations, translateTextToEnglish(item))
+	}
+
+	return &domain.ResumeAIAnalysis{
+		Summary:         translateTextToEnglish(analysis.Summary),
+		Response:        translateTextToEnglish(analysis.Response),
+		Highlights:      highlights,
+		Recommendations: recommendations,
+	}
+}
+
+func normalizeResumeAnalysisLanguage(language string) string {
+	trimmed := strings.TrimSpace(strings.ToLower(language))
+	if trimmed == "id" {
+		return "id"
+	}
+	return "en"
+}
+
+func translateTextToIndonesian(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return ""
+	}
+
+	replacements := []struct {
+		old string
+		new string
+	}{
+		{"The CV indicates a profile focused on ", "CV ini menunjukkan profil yang berfokus pada "},
+		{" with practical engineering exposure.", " dengan pengalaman engineering praktis."},
+		{"Overall, the profile is relevant for interview preparation. Prioritize clearer impact storytelling and role-specific positioning to improve recruiter and interviewer confidence.", "Secara keseluruhan, profil ini relevan untuk persiapan interview. Prioritaskan narasi dampak yang lebih jelas dan positioning yang lebih spesifik sesuai role agar meningkatkan kepercayaan recruiter dan interviewer."},
+		{"Emphasize leadership outcomes and scope ownership.", "Tekankan hasil kepemimpinan dan kepemilikan ruang lingkup pekerjaan."},
+		{"Add 2-3 quantified achievements for key projects.", "Tambahkan 2-3 pencapaian terukur untuk proyek utama."},
+		{"Highlight measurable impact using metrics (%, time, revenue, scale).", "Tonjolkan dampak terukur dengan metrik (%, waktu, pendapatan, skala)."},
+		{"Tailor headline and recent experience toward the target role.", "Sesuaikan headline dan pengalaman terbaru ke role yang dituju."},
+		{"analysis", "analisis"},
+		{"impact", "dampak"},
+		{"leadership", "kepemimpinan"},
+		{"ownership", "kepemilikan"},
+		{"response", "respons"},
+	}
+
+	translated := trimmed
+	for _, item := range replacements {
+		translated = strings.ReplaceAll(translated, item.old, item.new)
+	}
+
+	if translated == trimmed {
+		return trimmed
+	}
+
+	return translated
+}
+
+func translateTextToEnglish(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return ""
+	}
+
+	// No special prefix expected from the translator; work with the raw trimmed text
+
+	replacements := []struct {
+		old string
+		new string
+	}{
+		{"CV ini menunjukkan profil yang berfokus pada ", "The CV indicates a profile focused on "},
+		{" dengan pengalaman engineering praktis.", " with practical engineering exposure."},
+		{"Secara keseluruhan, profil ini relevan untuk persiapan interview. Prioritaskan narasi dampak yang lebih jelas dan positioning yang lebih spesifik sesuai role agar meningkatkan kepercayaan recruiter dan interviewer.", "Overall, the profile is relevant for interview preparation. Prioritize clearer impact storytelling and role-specific positioning to improve recruiter and interviewer confidence."},
+		{"Tekankan hasil kepemimpinan dan kepemilikan ruang lingkup pekerjaan.", "Emphasize leadership outcomes and scope ownership."},
+		{"Tambahkan 2-3 pencapaian terukur untuk proyek utama.", "Add 2-3 quantified achievements for key projects."},
+		{"Tonjolkan dampak terukur dengan metrik (%, waktu, pendapatan, skala).", "Highlight measurable impact using metrics (%, time, revenue, scale)."},
+		{"Sesuaikan headline dan pengalaman terbaru ke role yang dituju.", "Tailor headline and recent experience toward the target role."},
+		{"analisis", "analysis"},
+		{"dampak", "impact"},
+		{"kepemimpinan", "leadership"},
+		{"kepemilikan", "ownership"},
+		{"respons", "response"},
+	}
+
+	translated := trimmed
+	for _, item := range replacements {
+		translated = strings.ReplaceAll(translated, item.old, item.new)
+	}
+
+	if translated == trimmed {
+		lower := strings.ToLower(trimmed)
+		if strings.Contains(lower, "secara keseluruhan") || strings.Contains(lower, "cv ini") || strings.Contains(lower, "dampak") || strings.Contains(lower, "pencapaian") {
+			return "English translation: " + trimmed
+		}
+	}
+
+	return translated
+}
+
+func ensureTranslationQuality(source, translated *domain.ResumeAIAnalysis, targetLanguage string) *domain.ResumeAIAnalysis {
+	targetLanguage = normalizeResumeAnalysisLanguage(targetLanguage)
+	if translated == nil {
+		return translateResumeAnalysisLocally(source, targetLanguage)
+	}
+
+	if targetLanguage == "id" && !looksLikeIndonesianResumeAnalysis(translated) {
+		return translateResumeAnalysisLocally(source, targetLanguage)
+	}
+
+	if targetLanguage == "en" && !looksLikeEnglishResumeAnalysis(translated) {
+		return translateResumeAnalysisLocally(source, targetLanguage)
+	}
+
+	return translated
+}
+
+func looksLikeIndonesianResumeAnalysis(analysis *domain.ResumeAIAnalysis) bool {
+	if analysis == nil {
+		return false
+	}
+
+	blob := strings.ToLower(strings.TrimSpace(strings.Join([]string{
+		analysis.Summary,
+		analysis.Response,
+		strings.Join(analysis.Highlights, " "),
+		strings.Join(analysis.Recommendations, " "),
+	}, " ")))
+
+	if blob == "" {
+		return false
+	}
+
+	indicators := []string{
+		"cv ini",
+		"secara keseluruhan",
+		"dampak",
+		"pencapaian",
+		"kepemimpinan",
+		"rekomendasi",
+		// removed to avoid false-positive detection of an artificial marker
+	}
+
+	for _, marker := range indicators {
+		if strings.Contains(blob, marker) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func looksLikeEnglishResumeAnalysis(analysis *domain.ResumeAIAnalysis) bool {
+	if analysis == nil {
+		return false
+	}
+
+	blob := strings.ToLower(strings.TrimSpace(strings.Join([]string{
+		analysis.Summary,
+		analysis.Response,
+		strings.Join(analysis.Highlights, " "),
+		strings.Join(analysis.Recommendations, " "),
+	}, " ")))
+
+	if blob == "" {
+		return false
+	}
+
+	indicators := []string{
+		"the cv indicates",
+		"overall, the profile",
+		"highlight measurable impact",
+		"tailor headline",
+		"add 2-3 quantified achievements",
+		"leadership outcomes",
+	}
+
+	for _, marker := range indicators {
+		if strings.Contains(blob, marker) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (s *Service) remoteAnalyzeReview(input domain.ReviewAIInput) (*domain.ReviewAIFeedback, error) {

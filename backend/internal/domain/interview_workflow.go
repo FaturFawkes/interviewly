@@ -81,6 +81,7 @@ type ResumeUpload struct {
 	FileName    string
 	ContentType string
 	FileData    []byte
+	Language    string
 }
 
 type ResumeFile struct {
@@ -257,7 +258,12 @@ type AgentFeedbackInput struct {
 type InterviewRepository interface {
 	SaveParsedJob(userID, rawDescription string, insights *JobInsights) (*ParsedJobDescription, error)
 	SaveResume(userID, content string) (*ResumeRecord, error)
+	SaveResumeWithFilePath(userID, content, filePath string) (*ResumeRecord, error)
 	GetLatestResume(userID string) (*ResumeRecord, error)
+	SaveResumeAnalysis(userID, resumeID, contentHash, model string, analysis *ResumeAIAnalysis) (*ResumeAnalysisRecord, error)
+	FindResumeAnalysisByHash(userID, contentHash, model string) (*ResumeAnalysisRecord, error)
+	GetLatestResumeAnalysis(userID string) (*ResumeAnalysisRecord, error)
+	GetLatestResumeAnalysisByLanguage(userID, language string) (*ResumeAnalysisRecord, error)
 	SaveGeneratedQuestions(userID, resumeID, jobParseID string, questions []GeneratedQuestion) ([]StoredQuestion, error)
 	CreatePracticeSession(userID, resumeID, jobParseID string, questionIDs []string, metadata SessionMetadata) (*PracticeSession, error)
 	CompletePracticeSession(userID, sessionID string) (*PracticeSession, error)
@@ -286,6 +292,7 @@ type InterviewUseCase interface {
 	SaveResume(userID string, upload ResumeUpload) (*ResumeRecord, error)
 	GetLatestResume(userID string) (*ResumeRecord, error)
 	AnalyzeResume(userID string, upload ResumeUpload) (*ResumeAIAnalysis, error)
+	GetLatestResumeAnalysis(userID, language string) (*ResumeAIAnalysis, error)
 	DownloadLatestResume(userID string) (*ResumeFile, error)
 	GenerateQuestions(userID, resumeText, jobDescription string, interviewLanguage InterviewLanguage, interviewMode InterviewMode, interviewDifficulty InterviewDifficulty) ([]StoredQuestion, error)
 	CreatePracticeSession(userID, resumeID, jobParseID string, questionIDs []string, metadata SessionMetadata) (*PracticeSession, error)

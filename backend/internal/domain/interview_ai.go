@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 // JobInsights represents structured parsing output from a raw job description.
 type JobInsights struct {
 	Skills    []string `json:"skills"`
@@ -29,6 +31,20 @@ type ResumeAIAnalysis struct {
 	Response        string   `json:"response"`
 	Highlights      []string `json:"highlights"`
 	Recommendations []string `json:"recommendations"`
+}
+
+type ResumeAnalysisRecord struct {
+	ID              string    `json:"id"`
+	UserID          string    `json:"user_id"`
+	ResumeID        string    `json:"resume_id,omitempty"`
+	ContentHash     string    `json:"content_hash"`
+	Model           string    `json:"model"`
+	Summary         string    `json:"summary"`
+	Response        string    `json:"response"`
+	Highlights      []string  `json:"highlights"`
+	Recommendations []string  `json:"recommendations"`
+	RawResponse     string    `json:"raw_response,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // ReviewAIInput represents one coaching turn context for review mode.

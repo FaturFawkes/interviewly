@@ -9,14 +9,108 @@ import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Tag } from "@/components/ui/Tag";
 import { api } from "@/lib/api/endpoints";
+import type { ResumeAIAnalysis } from "@/lib/api/types";
 import { extractTextFromResumeFile, getAllowedResumeExtensionsLabel } from "@/lib/resume-parser";
 import { pickLocaleText } from "@/lib/i18n";
 
 const RESUME_ACCEPT = ".pdf,.docx,.txt,.md,.rtf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,application/rtf,text/rtf";
 
+function localizeUploadError(locale: "id" | "en", message: string): string {
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes("resume storage is not configured")) {
+    return pickLocaleText(locale, "Penyimpanan file CV belum terkonfigurasi.", "CV file storage is not configured.");
+  }
+  if (normalized.includes("resume content is required")) {
+    return pickLocaleText(locale, "Konten CV wajib diisi.", "Resume content is required.");
+  }
+  if (normalized.includes("resume analysis not found")) {
+    return pickLocaleText(locale, "Analisis CV belum tersedia.", "Resume analysis is not available yet.");
+  }
+  if (normalized.includes("resume not found")) {
+    return pickLocaleText(locale, "CV belum tersedia.", "Resume is not available yet.");
+  }
+
+  return message;
+}
+
+function localizeAnalysisText(locale: "id" | "en", text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return text;
+  }
+
+  const working = trimmed;
+
+  const replacements: Array<[string, string]> = locale === "id"
+    ? [
+      ["The CV indicates a profile focused on ", "CV ini menunjukkan profil yang berfokus pada "],
+      [" with practical engineering exposure.", " dengan pengalaman engineering praktis."],
+      [
+        "Overall, the profile is relevant for interview preparation. Prioritize clearer impact storytelling and role-specific positioning to improve recruiter and interviewer confidence.",
+        "Secara keseluruhan, profil ini relevan untuk persiapan interview. Prioritaskan narasi dampak yang lebih jelas dan positioning yang lebih spesifik sesuai role agar meningkatkan kepercayaan recruiter dan interviewer.",
+      ],
+      ["Emphasize leadership outcomes and scope ownership.", "Tekankan hasil kepemimpinan dan kepemilikan ruang lingkup pekerjaan."],
+      ["Add 2-3 quantified achievements for key projects.", "Tambahkan 2-3 pencapaian terukur untuk proyek utama."],
+      ["Highlight measurable impact using metrics (%, time, revenue, scale).", "Tonjolkan dampak terukur dengan metrik (%, waktu, pendapatan, skala)."],
+      ["Tailor headline and recent experience toward the target role.", "Sesuaikan headline dan pengalaman terbaru ke role yang dituju."],
+      ["analysis", "analisis"],
+      ["impact", "dampak"],
+      ["leadership", "kepemimpinan"],
+      ["ownership", "kepemilikan"],
+    ]
+    : [
+      ["CV ini menunjukkan profil yang berfokus pada ", "The CV indicates a profile focused on "],
+      [" dengan pengalaman engineering praktis.", " with practical engineering exposure."],
+      [
+        "Secara keseluruhan, profil ini relevan untuk persiapan interview. Prioritaskan narasi dampak yang lebih jelas dan positioning yang lebih spesifik sesuai role agar meningkatkan kepercayaan recruiter dan interviewer.",
+        "Overall, the profile is relevant for interview preparation. Prioritize clearer impact storytelling and role-specific positioning to improve recruiter and interviewer confidence.",
+      ],
+      ["Tekankan hasil kepemimpinan dan kepemilikan ruang lingkup pekerjaan.", "Emphasize leadership outcomes and scope ownership."],
+      ["Tambahkan 2-3 pencapaian terukur untuk proyek utama.", "Add 2-3 quantified achievements for key projects."],
+      ["Tonjolkan dampak terukur dengan metrik (%, waktu, pendapatan, skala).", "Highlight measurable impact using metrics (%, time, revenue, scale)."],
+      ["Sesuaikan headline dan pengalaman terbaru ke role yang dituju.", "Tailor headline and recent experience toward the target role."],
+      ["analisis", "analysis"],
+      ["dampak", "impact"],
+      ["kepemimpinan", "leadership"],
+      ["kepemilikan", "ownership"],
+      ["respons", "response"],
+    ];
+
+  let localized = working;
+  for (const [from, to] of replacements) {
+    localized = localized.replaceAll(from, to);
+  }
+
+  if (localized === trimmed) {
+    return trimmed;
+  }
+
+  return localized;
+}
+
+function normalizeAnalysisForLocale(locale: "id" | "en", analysis: ResumeAIAnalysis): ResumeAIAnalysis {
+  if (locale !== "id") {
+    return analysis;
+  }
+
+  return {
+    ...analysis,
+    summary: localizeAnalysisText(locale, analysis.summary ?? ""),
+    response: localizeAnalysisText(locale, analysis.response ?? ""),
+    highlights: Array.isArray(analysis.highlights)
+      ? analysis.highlights.map((item) => localizeAnalysisText(locale, item))
+      : [],
+    recommendations: Array.isArray(analysis.recommendations)
+      ? analysis.recommendations.map((item) => localizeAnalysisText(locale, item))
+      : [],
+  };
+}
+
 export default function UploadPage() {
   const { locale } = useLanguage();
   const [resumeText, setResumeText] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [latestResumePreview, setLatestResumePreview] = useState<string>("");
   const [analysisSummary, setAnalysisSummary] = useState<string>("");
@@ -53,17 +147,23 @@ export default function UploadPage() {
       setResumeText(normalizedResume);
       setLatestResumePreview(normalizedResume.slice(0, 2200));
 
-      const analysis = await api.analyzeResume(normalizedResume);
+      const analysis = normalizeAnalysisForLocale(locale, await api.getLatestResumeAnalysis(locale));
       setAnalysisSummary(analysis.summary ?? "");
       setAnalysisResponse(analysis.response ?? "");
       setAnalysisHighlights(Array.isArray(analysis.highlights) ? analysis.highlights : []);
       setAnalysisRecommendations(Array.isArray(analysis.recommendations) ? analysis.recommendations : []);
       setSaved(true);
     } catch (err) {
-      const message = err instanceof Error ? err.message : pickLocaleText(locale, "Gagal memuat CV terbaru.", "Failed to load latest CV.");
+      const rawMessage = err instanceof Error ? err.message : pickLocaleText(locale, "Gagal memuat CV terbaru.", "Failed to load latest CV.");
+      const message = localizeUploadError(locale, rawMessage);
       const lowerMessage = message.toLowerCase();
 
-      if (lowerMessage.includes("resume not found") || lowerMessage.includes("not found")) {
+      if (lowerMessage.includes("resume analysis not found")) {
+        setAnalysisSummary("");
+        setAnalysisResponse("");
+        setAnalysisHighlights([]);
+        setAnalysisRecommendations([]);
+      } else if (lowerMessage.includes("resume not found") || lowerMessage.includes("not found")) {
         setSaved(false);
         setLatestResumePreview("");
         setAnalysisSummary("");
@@ -76,7 +176,7 @@ export default function UploadPage() {
     } finally {
       setLoadingLatest(false);
     }
-  }, []);
+  }, [locale]);
 
   useEffect(() => {
     void loadLatestResumeAndAnalysis();
@@ -92,8 +192,13 @@ export default function UploadPage() {
     setError(null);
 
     try {
-      await api.saveResume(effectiveResume);
-      const analysis = await api.analyzeResume(effectiveResume);
+      if (selectedFile) {
+        await api.saveResumeUpload(selectedFile, effectiveResume, locale);
+      } else {
+        await api.saveResume(effectiveResume, locale);
+      }
+
+      const analysis = normalizeAnalysisForLocale(locale, await api.analyzeResume(undefined, locale));
       setAnalysisSummary(analysis.summary ?? "");
       setAnalysisResponse(analysis.response ?? "");
       setAnalysisHighlights(Array.isArray(analysis.highlights) ? analysis.highlights : []);
@@ -101,7 +206,8 @@ export default function UploadPage() {
       setLatestResumePreview(effectiveResume.slice(0, 2200));
       setSaved(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : pickLocaleText(locale, "Analisis gagal.", "Analysis failed."));
+      const rawMessage = err instanceof Error ? err.message : pickLocaleText(locale, "Analisis gagal.", "Analysis failed.");
+      setError(localizeUploadError(locale, rawMessage));
     } finally {
       setLoading(false);
     }
@@ -116,6 +222,7 @@ export default function UploadPage() {
     setLoading(true);
     setError(null);
     setSelectedFileName(file.name);
+    setSelectedFile(file);
     setSaved(false);
     setAnalysisSummary("");
     setAnalysisResponse("");
@@ -125,14 +232,17 @@ export default function UploadPage() {
     try {
       const content = await extractTextFromResumeFile(file);
       if (!content.trim()) {
-        throw new Error("Konten CV tidak dapat dibaca. Coba file lain.");
+        throw new Error(pickLocaleText(locale, "Konten CV tidak dapat dibaca. Coba file lain.", "CV content could not be parsed. Please try another file."));
       }
 
       setResumeText(content);
     } catch (err) {
       setResumeText("");
       setLatestResumePreview("");
-      setError(err instanceof Error ? err.message : pickLocaleText(locale, "Gagal membaca file CV.", "Failed to read CV file."));
+      setSelectedFile(null);
+      setSelectedFileName(null);
+      const rawMessage = err instanceof Error ? err.message : pickLocaleText(locale, "Gagal membaca file CV.", "Failed to read CV file.");
+      setError(localizeUploadError(locale, rawMessage));
     } finally {
       setLoading(false);
     }
@@ -164,7 +274,7 @@ export default function UploadPage() {
           {error && <p className="text-sm text-red-300">{error}</p>}
           {saved && (
             <p className="text-sm text-cyan-200">
-              CV berhasil disimpan dan dianalisis. Kamu bisa lanjut ke Practice untuk interview.
+              {pickLocaleText(locale, "CV berhasil disimpan dan dianalisis. Kamu bisa lanjut ke Practice untuk interview.", "CV has been saved and analyzed. You can continue to Practice for interview.")}
             </p>
           )}
         </Card>
@@ -225,7 +335,7 @@ export default function UploadPage() {
 
             <div className="grid gap-4 lg:grid-cols-2">
               <InfoColumn
-                title="Highlights"
+                title={pickLocaleText(locale, "Sorotan", "Highlights")}
                 items={analysisHighlights}
                 empty={pickLocaleText(locale, "Belum ada highlight analisis.", "No analysis highlights yet.")}
               />
@@ -248,6 +358,8 @@ export default function UploadPage() {
     </AppShell>
   );
 }
+
+// translation via backend removed; frontend uses Google Translate widget for dynamic client-side translation
 
 function InfoColumn({ title, items, empty }: { title: string; items: string[]; empty: string }) {
   return (

@@ -15,6 +15,13 @@ This backend can be deployed to Fly.io (recommended) or Railway using Docker.
 - `REDIS_DB`
 - `JWT_SECRET`
 - `JWT_ISSUER`
+- `SUPABASE_URL` (opsional; dipakai untuk derivasi endpoint jika `SUPABASE_S3_ENDPOINT` kosong)
+- `SUPABASE_S3_ENDPOINT` (opsional; format resmi: `https://<project-ref>.storage.supabase.co/storage/v1/s3`)
+- `SUPABASE_S3_REGION` (default: `us-east-1`, gunakan region dari Storage settings)
+- `SUPABASE_S3_ACCESS_KEY_ID` (opsional, wajib jika ingin upload file resume ke Supabase S3)
+- `SUPABASE_S3_SECRET_ACCESS_KEY` (opsional, wajib jika ingin upload file resume ke Supabase S3)
+- `SUPABASE_STORAGE_BUCKET` (default: `resumes`)
+- `SUPABASE_STORAGE_PATH_PREFIX` (opsional, mis. `prod`)
 
 ## Stripe environment variables (if payments enabled)
 

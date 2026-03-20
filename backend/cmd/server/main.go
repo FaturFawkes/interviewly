@@ -17,6 +17,7 @@ import (
 	"github.com/interview_app/backend/internal/service/ai"
 	"github.com/interview_app/backend/internal/service/notification"
 	"github.com/interview_app/backend/internal/service/payment"
+	"github.com/interview_app/backend/internal/service/storage"
 	"github.com/interview_app/backend/internal/service/subscription"
 	"github.com/interview_app/backend/internal/service/voice"
 	"github.com/interview_app/backend/internal/usecase"
@@ -42,8 +43,9 @@ func main() {
 	healthHandler := handler.NewHealthHandler(healthUC)
 	aiService := ai.NewService(cfg)
 	interviewRepo := repository.NewInterviewRepository(postgresPool)
+	resumeStorage := setupResumeStorage(cfg)
 	subscriptionService := subscription.NewService(cfg, postgresPool, redisCache)
-	interviewUC := usecase.NewInterviewUseCase(aiService, interviewRepo, subscriptionService)
+	interviewUC := usecase.NewInterviewUseCase(aiService, interviewRepo, resumeStorage, subscriptionService)
 	jobHandler := handler.NewJobHandler(interviewUC)
 	resumeHandler := handler.NewResumeHandler(interviewUC)
 	questionHandler := handler.NewQuestionHandler(interviewUC)
@@ -140,6 +142,27 @@ func setupRedis(cfg *config.Config) (*cache.RedisCache, func()) {
 	return redisCache, func() {
 		_ = redisCache.Close()
 	}
+}
+
+func setupResumeStorage(cfg *config.Config) domain.ResumeFileStorage {
+	resumeStorage, err := storage.NewSupabaseResumeStorage(cfg)
+	if err != nil {
+		log.Printf("Supabase resume storage not initialized: %v", err)
+	} else if resumeStorage != nil {
+		log.Println("Resume storage initialized: supabase")
+		return resumeStorage
+	}
+
+	resumeStorage, err = storage.NewMinIOResumeStorage(cfg)
+	if err != nil {
+		log.Printf("MinIO resume storage not initialized: %v", err)
+		return nil
+	}
+	if resumeStorage != nil {
+		log.Println("Resume storage initialized: minio")
+	}
+
+	return resumeStorage
 }
 
 func startIdleSessionSweeper(cfg *config.Config, interviewUC domain.InterviewUseCase) {
