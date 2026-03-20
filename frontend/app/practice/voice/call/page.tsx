@@ -216,6 +216,33 @@ export default function VoiceCallPage() {
     };
   }, [hasActiveVoiceSession]);
 
+  useEffect(() => {
+    if (!hasActiveVoiceSession || !session?.id) {
+      return;
+    }
+
+    const sendHeartbeat = async () => {
+      try {
+        await api.touchSessionActivity(session.id);
+      } catch {
+        return;
+      }
+    };
+
+    void sendHeartbeat();
+    const intervalID = window.setInterval(() => {
+      if (!isCallActiveRef.current) {
+        return;
+      }
+
+      void sendHeartbeat();
+    }, 20000);
+
+    return () => {
+      window.clearInterval(intervalID);
+    };
+  }, [hasActiveVoiceSession, session?.id]);
+
   const navigateBackWithoutPrompt = useCallback(() => {
     if (typeof window === "undefined") {
       return;

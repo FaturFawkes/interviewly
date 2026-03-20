@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input, TextArea } from "@/components/ui/Input";
 import { useInterviewFlow } from "@/hooks/useInterviewFlow";
+import { api } from "@/lib/api/endpoints";
 import { pickLocaleText } from "@/lib/i18n";
 import type { Locale } from "@/lib/i18n";
 import type { InterviewDifficulty, InterviewLanguage, InterviewMode } from "@/lib/api/types";
@@ -104,6 +105,29 @@ export default function PracticePage() {
       window.removeEventListener("popstate", handlePopState);
     };
   }, [hasActiveTextSession]);
+
+  useEffect(() => {
+    if (!hasActiveTextSession || !session?.id) {
+      return;
+    }
+
+    const sendHeartbeat = async () => {
+      try {
+        await api.touchSessionActivity(session.id);
+      } catch {
+        return;
+      }
+    };
+
+    void sendHeartbeat();
+    const intervalID = window.setInterval(() => {
+      void sendHeartbeat();
+    }, 25000);
+
+    return () => {
+      window.clearInterval(intervalID);
+    };
+  }, [hasActiveTextSession, session?.id]);
 
   const navigateBackWithoutPrompt = useCallback(() => {
     if (typeof window === "undefined") {

@@ -5,21 +5,44 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/interview_app/backend/internal/domain"
+	"github.com/interview_app/backend/internal/service/subscription"
 )
 
 type interviewUseCase struct {
-	aiService domain.AIService
-	repo      domain.InterviewRepository
+	aiService           domain.AIService
+	repo                domain.InterviewRepository
+	subscriptionService *subscription.Service
 }
 
 // NewInterviewUseCase creates a usecase for interview business workflows.
-func NewInterviewUseCase(aiService domain.AIService, repo domain.InterviewRepository) domain.InterviewUseCase {
+func NewInterviewUseCase(aiService domain.AIService, repo domain.InterviewRepository, subscriptionService *subscription.Service) domain.InterviewUseCase {
 	return &interviewUseCase{
-		aiService: aiService,
-		repo:      repo,
+		aiService:           aiService,
+		repo:                repo,
+		subscriptionService: subscriptionService,
 	}
+}
+
+type aiModelOverrideService interface {
+	ParseJobDescriptionWithModel(jobDescription, modelOverride string) (*domain.JobInsights, error)
+	GenerateQuestionsWithModel(
+		resumeText,
+		jobDescription string,
+		interviewLanguage domain.InterviewLanguage,
+		interviewMode domain.InterviewMode,
+		interviewDifficulty domain.InterviewDifficulty,
+		modelOverride string,
+	) ([]domain.GeneratedQuestion, error)
+	AnalyzeAnswerWithModel(
+		question,
+		answer string,
+		interviewLanguage domain.InterviewLanguage,
+		modelOverride string,
+	) (*domain.AnswerAnalysis, error)
+	AnalyzeResumeWithModel(resumeText, modelOverride string) (*domain.ResumeAIAnalysis, error)
 }
 
 func (uc *interviewUseCase) ParseJobDescription(userID, rawDescription string) (*domain.ParsedJobDescription, error) {
@@ -30,7 +53,17 @@ func (uc *interviewUseCase) ParseJobDescription(userID, rawDescription string) (
 		return nil, errors.New("job description is required")
 	}
 
-	insights, err := uc.aiService.ParseJobDescription(rawDescription)
+	if err := uc.consumeJDParse(userID, "parse_job_description"); err != nil {
+		return nil, err
+	}
+
+	decision, err := uc.consumeTextRequest(userID, "parse_job_description")
+	if err != nil {
+		return nil, err
+	}
+
+	modelOverride := uc.applyTextFUPDecision(decision)
+	insights, err := uc.parseJobDescriptionWithModel(rawDescription, modelOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +114,13 @@ func (uc *interviewUseCase) AnalyzeResume(userID string, upload domain.ResumeUpl
 		content = latest.Content
 	}
 
-	return uc.aiService.AnalyzeResume(content)
+	decision, err := uc.consumeTextRequest(userID, "analyze_resume")
+	if err != nil {
+		return nil, err
+	}
+
+	modelOverride := uc.applyTextFUPDecision(decision)
+	return uc.analyzeResumeWithModel(content, modelOverride)
 }
 
 func (uc *interviewUseCase) DownloadLatestResume(userID string) (*domain.ResumeFile, error) {
@@ -137,7 +176,17 @@ func (uc *interviewUseCase) GenerateQuestions(
 		}
 	}
 
-	insights, err := uc.aiService.ParseJobDescription(jobDescription)
+	if err := uc.consumeJDParse(userID, "generate_questions"); err != nil {
+		return nil, err
+	}
+
+	parseDecision, err := uc.consumeTextRequest(userID, "generate_questions_parse")
+	if err != nil {
+		return nil, err
+	}
+
+	parseModelOverride := uc.applyTextFUPDecision(parseDecision)
+	insights, err := uc.parseJobDescriptionWithModel(jobDescription, parseModelOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -147,12 +196,19 @@ func (uc *interviewUseCase) GenerateQuestions(
 		return nil, err
 	}
 
-	generated, err := uc.aiService.GenerateQuestions(
+	generateDecision, err := uc.consumeTextRequest(userID, "generate_questions")
+	if err != nil {
+		return nil, err
+	}
+
+	generateModelOverride := uc.applyTextFUPDecision(generateDecision)
+	generated, err := uc.generateQuestionsWithModel(
 		resumeText,
 		jobDescription,
 		interviewLanguage,
 		interviewMode,
 		interviewDifficulty,
+		generateModelOverride,
 	)
 	if err != nil {
 		return nil, err
@@ -245,7 +301,13 @@ func (uc *interviewUseCase) GenerateFeedback(userID, sessionID, questionID, ques
 		return nil, errors.New("answer is required")
 	}
 
-	analysis, err := uc.aiService.AnalyzeAnswer(question, answer, domain.InterviewLanguageEnglish)
+	decision, err := uc.consumeTextRequest(userID, "generate_feedback")
+	if err != nil {
+		return nil, err
+	}
+
+	modelOverride := uc.applyTextFUPDecision(decision)
+	analysis, err := uc.analyzeAnswerWithModel(question, answer, domain.InterviewLanguageEnglish, modelOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -373,6 +435,133 @@ func (uc *interviewUseCase) GetAnalyticsOverview(userID string) (*domain.Analyti
 		WeakAreas:         progress.WeakAreas,
 		RecentSessions:    recent,
 	}, nil
+}
+
+func (uc *interviewUseCase) TouchSessionActivity(userID, sessionID string) error {
+	if strings.TrimSpace(userID) == "" {
+		return errors.New("user id is required")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return errors.New("session id is required")
+	}
+
+	return uc.repo.TouchSessionActivity(userID, sessionID)
+}
+
+func (uc *interviewUseCase) AbandonIdleSessions(idleFor time.Duration) (int64, error) {
+	if idleFor <= 0 {
+		return 0, errors.New("idle duration must be greater than zero")
+	}
+
+	return uc.repo.AbandonIdleSessions(idleFor)
+}
+
+func (uc *interviewUseCase) consumeJDParse(userID, source string) error {
+	if uc.subscriptionService == nil {
+		return nil
+	}
+
+	_, err := uc.subscriptionService.ConsumeJDParse(userID, source)
+	return err
+}
+
+func (uc *interviewUseCase) consumeTextRequest(userID, source string) (*subscription.TextUsageDecision, error) {
+	if uc.subscriptionService == nil {
+		return nil, nil
+	}
+
+	return uc.subscriptionService.ConsumeTextRequest(userID, source)
+}
+
+func (uc *interviewUseCase) applyTextFUPDecision(decision *subscription.TextUsageDecision) string {
+	if uc.subscriptionService == nil || decision == nil {
+		return ""
+	}
+
+	if decision.ShouldDelayResponse {
+		time.Sleep(uc.subscriptionService.TextFUPDelay())
+	}
+
+	if !decision.FUPExceeded {
+		return ""
+	}
+
+	if model := strings.TrimSpace(decision.SuggestedModel); model != "" {
+		return model
+	}
+
+	return uc.subscriptionService.TextFUPDowngradeModel()
+}
+
+func (uc *interviewUseCase) parseJobDescriptionWithModel(jobDescription, modelOverride string) (*domain.JobInsights, error) {
+	if strings.TrimSpace(modelOverride) == "" {
+		return uc.aiService.ParseJobDescription(jobDescription)
+	}
+
+	overrideService, ok := uc.aiService.(aiModelOverrideService)
+	if !ok {
+		return uc.aiService.ParseJobDescription(jobDescription)
+	}
+
+	return overrideService.ParseJobDescriptionWithModel(jobDescription, modelOverride)
+}
+
+func (uc *interviewUseCase) generateQuestionsWithModel(
+	resumeText,
+	jobDescription string,
+	interviewLanguage domain.InterviewLanguage,
+	interviewMode domain.InterviewMode,
+	interviewDifficulty domain.InterviewDifficulty,
+	modelOverride string,
+) ([]domain.GeneratedQuestion, error) {
+	if strings.TrimSpace(modelOverride) == "" {
+		return uc.aiService.GenerateQuestions(resumeText, jobDescription, interviewLanguage, interviewMode, interviewDifficulty)
+	}
+
+	overrideService, ok := uc.aiService.(aiModelOverrideService)
+	if !ok {
+		return uc.aiService.GenerateQuestions(resumeText, jobDescription, interviewLanguage, interviewMode, interviewDifficulty)
+	}
+
+	return overrideService.GenerateQuestionsWithModel(
+		resumeText,
+		jobDescription,
+		interviewLanguage,
+		interviewMode,
+		interviewDifficulty,
+		modelOverride,
+	)
+}
+
+func (uc *interviewUseCase) analyzeAnswerWithModel(
+	question,
+	answer string,
+	interviewLanguage domain.InterviewLanguage,
+	modelOverride string,
+) (*domain.AnswerAnalysis, error) {
+	if strings.TrimSpace(modelOverride) == "" {
+		return uc.aiService.AnalyzeAnswer(question, answer, interviewLanguage)
+	}
+
+	overrideService, ok := uc.aiService.(aiModelOverrideService)
+	if !ok {
+		return uc.aiService.AnalyzeAnswer(question, answer, interviewLanguage)
+	}
+
+	return overrideService.AnalyzeAnswerWithModel(question, answer, interviewLanguage, modelOverride)
+}
+
+func (uc *interviewUseCase) analyzeResumeWithModel(resumeText, modelOverride string) (*domain.ResumeAIAnalysis, error) {
+	if strings.TrimSpace(modelOverride) == "" {
+		return uc.aiService.AnalyzeResume(resumeText)
+	}
+
+	overrideService, ok := uc.aiService.(aiModelOverrideService)
+	if !ok {
+		return uc.aiService.AnalyzeResume(resumeText)
+	}
+
+	return overrideService.AnalyzeResumeWithModel(resumeText, modelOverride)
 }
 
 func topWeakAreas(freq map[string]int, limit int) []string {

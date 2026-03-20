@@ -10,6 +10,7 @@ import (
 	"github.com/interview_app/backend/internal/delivery/http/handler"
 	"github.com/interview_app/backend/internal/delivery/http/middleware"
 	"github.com/interview_app/backend/internal/delivery/http/router"
+	"github.com/interview_app/backend/internal/domain"
 	"github.com/interview_app/backend/internal/infrastructure/cache"
 	"github.com/interview_app/backend/internal/infrastructure/database"
 	"github.com/interview_app/backend/internal/repository"
@@ -41,15 +42,15 @@ func main() {
 	healthHandler := handler.NewHealthHandler(healthUC)
 	aiService := ai.NewService(cfg)
 	interviewRepo := repository.NewInterviewRepository(postgresPool)
-	interviewUC := usecase.NewInterviewUseCase(aiService, interviewRepo)
+	subscriptionService := subscription.NewService(cfg, postgresPool, redisCache)
+	interviewUC := usecase.NewInterviewUseCase(aiService, interviewRepo, subscriptionService)
 	jobHandler := handler.NewJobHandler(interviewUC)
 	resumeHandler := handler.NewResumeHandler(interviewUC)
 	questionHandler := handler.NewQuestionHandler(interviewUC)
-	subscriptionService := subscription.NewService(cfg, postgresPool, redisCache)
 	subscriptionHandler := handler.NewSubscriptionHandler(subscriptionService)
 	voiceService := voice.NewService(cfg)
 	voiceHandler := handler.NewVoiceHandler(voiceService, subscriptionService)
-	paymentService := payment.NewService(cfg)
+	paymentService := payment.NewService(cfg, postgresPool, subscriptionService)
 	paymentHandler := handler.NewPaymentHandler(paymentService)
 	sessionHandler := handler.NewSessionHandler(interviewUC, subscriptionService)
 	feedbackHandler := handler.NewFeedbackHandler(interviewUC)
@@ -60,9 +61,11 @@ func main() {
 	authUC := usecase.NewAuthUseCase(authRepo, otpSender, cfg.JWTSecret, cfg.JWTIssuer, 24*time.Hour, time.Duration(cfg.OTPExpiryMinutes)*time.Minute)
 	authHandler := handler.NewAuthHandler(authUC)
 	authMiddleware := middleware.AuthMiddleware(cfg)
+	rateLimitMiddleware := middleware.RateLimitMiddleware(redisCache, cfg.SubscriptionRateLimitPerMinute, time.Minute)
 
 	// Setup router
-	r := router.Setup(healthHandler, authHandler, meHandler, jobHandler, resumeHandler, questionHandler, voiceHandler, paymentHandler, sessionHandler, subscriptionHandler, feedbackHandler, progressHandler, authMiddleware)
+	r := router.Setup(healthHandler, authHandler, meHandler, jobHandler, resumeHandler, questionHandler, voiceHandler, paymentHandler, sessionHandler, subscriptionHandler, feedbackHandler, progressHandler, authMiddleware, rateLimitMiddleware)
+	startIdleSessionSweeper(cfg, interviewUC)
 
 	addr := fmt.Sprintf(":%s", cfg.ServerPort)
 	log.Printf("Server starting on %s (env: %s)", addr, cfg.Env)
@@ -120,4 +123,39 @@ func setupRedis(cfg *config.Config) (*cache.RedisCache, func()) {
 	return redisCache, func() {
 		_ = redisCache.Close()
 	}
+}
+
+func startIdleSessionSweeper(cfg *config.Config, interviewUC domain.InterviewUseCase) {
+	if cfg == nil || interviewUC == nil {
+		return
+	}
+
+	idleTimeout := time.Duration(cfg.SessionIdleTimeoutSeconds) * time.Second
+	if idleTimeout <= 0 {
+		return
+	}
+
+	sweepInterval := time.Duration(cfg.SessionIdleSweepIntervalSeconds) * time.Second
+	if sweepInterval <= 0 {
+		sweepInterval = 30 * time.Second
+	}
+
+	log.Printf("Idle session sweeper started (timeout=%s, interval=%s)", idleTimeout, sweepInterval)
+
+	go func() {
+		ticker := time.NewTicker(sweepInterval)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			abandonedCount, err := interviewUC.AbandonIdleSessions(idleTimeout)
+			if err != nil {
+				log.Printf("Idle session sweeper error: %v", err)
+				continue
+			}
+
+			if abandonedCount > 0 {
+				log.Printf("Idle session sweeper abandoned %d sessions", abandonedCount)
+			}
+		}
+	}()
 }

@@ -55,6 +55,87 @@ func NewService(cfg *config.Config) domain.AIService {
 	}
 }
 
+func (s *Service) ParseJobDescriptionWithModel(jobDescription, modelOverride string) (*domain.JobInsights, error) {
+	if strings.TrimSpace(modelOverride) == "" {
+		return s.ParseJobDescription(jobDescription)
+	}
+
+	if s.useRemoteProvider() {
+		if remote, err := s.remoteParseJobDescriptionWithModel(jobDescription, modelOverride); err == nil {
+			return remote, nil
+		}
+	}
+
+	return s.ParseJobDescription(jobDescription)
+}
+
+func (s *Service) GenerateQuestionsWithModel(
+	resumeText,
+	jobDescription string,
+	interviewLanguage domain.InterviewLanguage,
+	interviewMode domain.InterviewMode,
+	interviewDifficulty domain.InterviewDifficulty,
+	modelOverride string,
+) ([]domain.GeneratedQuestion, error) {
+	if strings.TrimSpace(modelOverride) == "" {
+		return s.GenerateQuestions(resumeText, jobDescription, interviewLanguage, interviewMode, interviewDifficulty)
+	}
+
+	interviewLanguage = domain.NormalizeInterviewLanguage(string(interviewLanguage))
+	interviewMode = domain.NormalizeInterviewMode(string(interviewMode))
+	interviewDifficulty = domain.NormalizeInterviewDifficulty(string(interviewDifficulty))
+
+	if s.useRemoteProvider() {
+		if remote, err := s.remoteGenerateQuestionsWithModel(
+			resumeText,
+			jobDescription,
+			interviewLanguage,
+			interviewMode,
+			interviewDifficulty,
+			modelOverride,
+		); err == nil {
+			return sanitizeGeneratedQuestionsByMode(remote, interviewMode), nil
+		}
+	}
+
+	return s.GenerateQuestions(resumeText, jobDescription, interviewLanguage, interviewMode, interviewDifficulty)
+}
+
+func (s *Service) AnalyzeAnswerWithModel(
+	question,
+	answer string,
+	interviewLanguage domain.InterviewLanguage,
+	modelOverride string,
+) (*domain.AnswerAnalysis, error) {
+	if strings.TrimSpace(modelOverride) == "" {
+		return s.AnalyzeAnswer(question, answer, interviewLanguage)
+	}
+
+	interviewLanguage = domain.NormalizeInterviewLanguage(string(interviewLanguage))
+
+	if s.useRemoteProvider() {
+		if remote, err := s.remoteAnalyzeAnswerWithModel(question, answer, interviewLanguage, modelOverride); err == nil {
+			return remote, nil
+		}
+	}
+
+	return s.AnalyzeAnswer(question, answer, interviewLanguage)
+}
+
+func (s *Service) AnalyzeResumeWithModel(resumeText, modelOverride string) (*domain.ResumeAIAnalysis, error) {
+	if strings.TrimSpace(modelOverride) == "" {
+		return s.AnalyzeResume(resumeText)
+	}
+
+	if s.useRemoteProvider() {
+		if remote, err := s.remoteAnalyzeResumeWithModel(resumeText, modelOverride); err == nil {
+			return remote, nil
+		}
+	}
+
+	return s.AnalyzeResume(resumeText)
+}
+
 func (s *Service) ParseJobDescription(jobDescription string) (*domain.JobInsights, error) {
 	if s.useRemoteProvider() {
 		if remote, err := s.remoteParseJobDescription(jobDescription); err == nil {
@@ -743,8 +824,17 @@ type openAIChatResponse struct {
 }
 
 func (s *Service) chatCompletion(systemPrompt, userPrompt string) (string, error) {
+	return s.chatCompletionWithModel(systemPrompt, userPrompt, "")
+}
+
+func (s *Service) chatCompletionWithModel(systemPrompt, userPrompt, modelOverride string) (string, error) {
+	model := strings.TrimSpace(modelOverride)
+	if model == "" {
+		model = s.model
+	}
+
 	requestPayload := openAIChatRequest{
-		Model: s.model,
+		Model: model,
 		Messages: []openAIChatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
@@ -792,10 +882,14 @@ func (s *Service) chatCompletion(systemPrompt, userPrompt string) (string, error
 }
 
 func (s *Service) remoteParseJobDescription(jobDescription string) (*domain.JobInsights, error) {
+	return s.remoteParseJobDescriptionWithModel(jobDescription, "")
+}
+
+func (s *Service) remoteParseJobDescriptionWithModel(jobDescription, modelOverride string) (*domain.JobInsights, error) {
 	systemPrompt := "You are an interview analysis assistant. Return only strict JSON."
 	userPrompt := "Parse the following job description into JSON with keys skills (array of strings), keywords (array of strings), themes (array of strings), seniority (string). Keep each list concise.\n\nJob Description:\n" + jobDescription
 
-	raw, err := s.chatCompletion(systemPrompt, userPrompt)
+	raw, err := s.chatCompletionWithModel(systemPrompt, userPrompt, modelOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -827,6 +921,24 @@ func (s *Service) remoteGenerateQuestions(
 	interviewLanguage domain.InterviewLanguage,
 	interviewMode domain.InterviewMode,
 	interviewDifficulty domain.InterviewDifficulty,
+) ([]domain.GeneratedQuestion, error) {
+	return s.remoteGenerateQuestionsWithModel(
+		resumeText,
+		jobDescription,
+		interviewLanguage,
+		interviewMode,
+		interviewDifficulty,
+		"",
+	)
+}
+
+func (s *Service) remoteGenerateQuestionsWithModel(
+	resumeText,
+	jobDescription string,
+	interviewLanguage domain.InterviewLanguage,
+	interviewMode domain.InterviewMode,
+	interviewDifficulty domain.InterviewDifficulty,
+	modelOverride string,
 ) ([]domain.GeneratedQuestion, error) {
 	interviewLanguage = domain.NormalizeInterviewLanguage(string(interviewLanguage))
 	interviewMode = domain.NormalizeInterviewMode(string(interviewMode))
@@ -860,7 +972,7 @@ func (s *Service) remoteGenerateQuestions(
 		targetLanguage,
 	) + "\n\nCV:\n" + resumeText + "\n\nJob Description:\n" + jobDescription
 
-	raw, err := s.chatCompletion(systemPrompt, userPrompt)
+	raw, err := s.chatCompletionWithModel(systemPrompt, userPrompt, modelOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -877,6 +989,10 @@ func (s *Service) remoteGenerateQuestions(
 }
 
 func (s *Service) remoteAnalyzeAnswer(question, answer string, interviewLanguage domain.InterviewLanguage) (*domain.AnswerAnalysis, error) {
+	return s.remoteAnalyzeAnswerWithModel(question, answer, interviewLanguage, "")
+}
+
+func (s *Service) remoteAnalyzeAnswerWithModel(question, answer string, interviewLanguage domain.InterviewLanguage, modelOverride string) (*domain.AnswerAnalysis, error) {
 	interviewLanguage = domain.NormalizeInterviewLanguage(string(interviewLanguage))
 	targetLanguage := "English"
 	if interviewLanguage == domain.InterviewLanguageIndonesian {
@@ -889,7 +1005,7 @@ func (s *Service) remoteAnalyzeAnswer(question, answer string, interviewLanguage
 		targetLanguage,
 	) + "\n\nQuestion:\n" + question + "\n\nAnswer:\n" + answer
 
-	raw, err := s.chatCompletion(systemPrompt, userPrompt)
+	raw, err := s.chatCompletionWithModel(systemPrompt, userPrompt, modelOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -922,10 +1038,14 @@ func (s *Service) remoteAnalyzeAnswer(question, answer string, interviewLanguage
 }
 
 func (s *Service) remoteAnalyzeResume(resumeText string) (*domain.ResumeAIAnalysis, error) {
+	return s.remoteAnalyzeResumeWithModel(resumeText, "")
+}
+
+func (s *Service) remoteAnalyzeResumeWithModel(resumeText, modelOverride string) (*domain.ResumeAIAnalysis, error) {
 	systemPrompt := "You are an interview coaching assistant. Return only strict JSON."
 	userPrompt := "Analyze the following CV and return JSON with keys summary (string), response (string), highlights (array of concise strings), recommendations (array of actionable strings). Keep content concise and practical.\n\nCV:\n" + resumeText
 
-	raw, err := s.chatCompletion(systemPrompt, userPrompt)
+	raw, err := s.chatCompletionWithModel(systemPrompt, userPrompt, modelOverride)
 	if err != nil {
 		return nil, err
 	}

@@ -30,6 +30,10 @@ type completeSessionRequest struct {
 	SessionID string `json:"session_id" binding:"required"`
 }
 
+type heartbeatSessionRequest struct {
+	SessionID string `json:"session_id" binding:"required"`
+}
+
 // SessionHandler handles interview session APIs.
 type SessionHandler struct {
 	interviewUC         domain.InterviewUseCase
@@ -168,4 +172,32 @@ func (h *SessionHandler) GetSessionHistory(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"sessions": sessions})
+}
+
+// TouchSessionActivity handles POST /api/session/heartbeat.
+func (h *SessionHandler) TouchSessionActivity(c *gin.Context) {
+	var req heartbeatSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userIDValue, exists := c.Get(middleware.UserIDContextKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	userID, ok := userIDValue.(string)
+	if !ok || userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user context"})
+		return
+	}
+
+	if err := h.interviewUC.TouchSessionActivity(userID, req.SessionID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"session_id": req.SessionID, "status": "ok"})
 }

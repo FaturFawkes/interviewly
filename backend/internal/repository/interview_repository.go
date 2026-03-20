@@ -237,6 +237,7 @@ func (r *interviewRepository) CreatePracticeSession(
 		Status:              domain.SessionStatusActive,
 		Score:               0,
 		CreatedAt:           now,
+		LastActivityAt:      now,
 	}
 
 	if r.pool != nil {
@@ -246,9 +247,9 @@ func (r *interviewRepository) CreatePracticeSession(
 		_, err := r.pool.Exec(
 			ctx,
 			`INSERT INTO app_practice_sessions
-				(id, user_id, resume_id, job_parse_id, question_ids, interview_mode, interview_language, interview_difficulty, target_role, target_company, status, score, created_at)
+				(id, user_id, resume_id, job_parse_id, question_ids, interview_mode, interview_language, interview_difficulty, target_role, target_company, status, score, created_at, last_activity_at)
 			 VALUES
-				($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+				($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 			session.ID,
 			session.UserID,
 			session.ResumeID,
@@ -262,6 +263,7 @@ func (r *interviewRepository) CreatePracticeSession(
 			session.Status,
 			session.Score,
 			session.CreatedAt,
+			session.LastActivityAt,
 		)
 		if err != nil {
 			return nil, err
@@ -283,7 +285,7 @@ func (r *interviewRepository) ListPracticeSessions(userID string) ([]domain.Prac
 
 		rows, err := r.pool.Query(
 			ctx,
-			`SELECT id, user_id, resume_id, job_parse_id, question_ids, interview_mode, interview_language, interview_difficulty, target_role, target_company, status, score, created_at, completed_at
+			`SELECT id, user_id, resume_id, job_parse_id, question_ids, interview_mode, interview_language, interview_difficulty, target_role, target_company, status, score, created_at, last_activity_at, completed_at
 			   FROM app_practice_sessions
 			  WHERE user_id = $1
 			  ORDER BY created_at DESC`,
@@ -309,6 +311,7 @@ func (r *interviewRepository) ListPracticeSessions(userID string) ([]domain.Prac
 					&session.Status,
 					&session.Score,
 					&session.CreatedAt,
+					&session.LastActivityAt,
 					&session.CompletedAt,
 				); scanErr == nil {
 					result = append(result, session)
@@ -343,14 +346,17 @@ func (r *interviewRepository) CompletePracticeSession(userID, sessionID string) 
 			ctx,
 			`UPDATE app_practice_sessions
 			    SET status = $1,
-			        completed_at = $2
+			        completed_at = $2,
+			        last_activity_at = $2
 			  WHERE id = $3
 			    AND user_id = $4
-			RETURNING id, user_id, resume_id, job_parse_id, question_ids, interview_mode, interview_language, interview_difficulty, target_role, target_company, status, score, created_at, completed_at`,
+			    AND status = $5
+			RETURNING id, user_id, resume_id, job_parse_id, question_ids, interview_mode, interview_language, interview_difficulty, target_role, target_company, status, score, created_at, last_activity_at, completed_at`,
 			domain.SessionStatusCompleted,
 			completedAt,
 			sessionID,
 			userID,
+			domain.SessionStatusActive,
 		).Scan(
 			&session.ID,
 			&session.UserID,
@@ -365,6 +371,7 @@ func (r *interviewRepository) CompletePracticeSession(userID, sessionID string) 
 			&session.Status,
 			&session.Score,
 			&session.CreatedAt,
+			&session.LastActivityAt,
 			&session.CompletedAt,
 		)
 		if err == nil {
@@ -379,8 +386,12 @@ func (r *interviewRepository) CompletePracticeSession(userID, sessionID string) 
 	if !exists || session.UserID != userID {
 		return nil, errors.New("session not found")
 	}
+	if session.Status != domain.SessionStatusActive {
+		return nil, errors.New("session is not active")
+	}
 
 	session.Status = domain.SessionStatusCompleted
+	session.LastActivityAt = completedAt
 	session.CompletedAt = &completedAt
 	r.sessions[sessionID] = session
 
@@ -406,7 +417,32 @@ func (r *interviewRepository) SaveSessionAnswer(userID, sessionID, questionID, a
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		_, err := r.pool.Exec(
+		tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback(ctx)
+
+		touchTag, err := tx.Exec(
+			ctx,
+			`UPDATE app_practice_sessions
+			    SET last_activity_at = $3
+			  WHERE id = $1
+			    AND user_id = $2
+			    AND status = $4`,
+			sessionID,
+			userID,
+			now,
+			domain.SessionStatusActive,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if touchTag.RowsAffected() == 0 {
+			return nil, errors.New("session is not active")
+		}
+
+		_, err = tx.Exec(
 			ctx,
 			`INSERT INTO app_session_answers
 				(id, session_id, question_id, user_id, answer_text, created_at)
@@ -419,13 +455,27 @@ func (r *interviewRepository) SaveSessionAnswer(userID, sessionID, questionID, a
 			record.Answer,
 			record.CreatedAt,
 		)
-		if err == nil {
-			return record, nil
+		if err != nil {
+			return nil, err
 		}
+
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+
+		return record, nil
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	session, exists := r.sessions[sessionID]
+	if !exists || session.UserID != userID || session.Status != domain.SessionStatusActive {
+		return nil, errors.New("session is not active")
+	}
+	session.LastActivityAt = now
+	r.sessions[sessionID] = session
+
 	r.answers[record.ID] = *record
 	return record, nil
 }
@@ -458,7 +508,32 @@ func (r *interviewRepository) SaveFeedback(
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		_, err := r.pool.Exec(
+		tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback(ctx)
+
+		touchTag, err := tx.Exec(
+			ctx,
+			`UPDATE app_practice_sessions
+			    SET last_activity_at = $3
+			  WHERE id = $1
+			    AND user_id = $2
+			    AND status = $4`,
+			sessionID,
+			userID,
+			now,
+			domain.SessionStatusActive,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if touchTag.RowsAffected() == 0 {
+			return nil, errors.New("session is not active")
+		}
+
+		_, err = tx.Exec(
 			ctx,
 			`INSERT INTO app_feedback
 				(id, user_id, session_id, question_id, question_text, answer_text, score, strengths, weaknesses, improvements, star_feedback, created_at)
@@ -477,13 +552,27 @@ func (r *interviewRepository) SaveFeedback(
 			record.STARFeedback,
 			record.CreatedAt,
 		)
-		if err == nil {
-			return record, nil
+		if err != nil {
+			return nil, err
 		}
+
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+
+		return record, nil
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	session, exists := r.sessions[sessionID]
+	if !exists || session.UserID != userID || session.Status != domain.SessionStatusActive {
+		return nil, errors.New("session is not active")
+	}
+	session.LastActivityAt = now
+	r.sessions[sessionID] = session
+
 	r.feedbacks[record.ID] = *record
 	return record, nil
 }
@@ -710,12 +799,13 @@ func (r *interviewRepository) validateSessionQuestionReference(userID, sessionID
 		defer cancel()
 
 		var sessionUserID string
+		var sessionStatus string
 		var questionIDs []string
 		err := r.pool.QueryRow(
 			ctx,
-			`SELECT user_id, question_ids FROM app_practice_sessions WHERE id = $1`,
+			`SELECT user_id, status, question_ids FROM app_practice_sessions WHERE id = $1`,
 			sessionID,
-		).Scan(&sessionUserID, &questionIDs)
+		).Scan(&sessionUserID, &sessionStatus, &questionIDs)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return errors.New("session not found")
@@ -725,6 +815,10 @@ func (r *interviewRepository) validateSessionQuestionReference(userID, sessionID
 
 		if sessionUserID != userID {
 			return errors.New("session not found")
+		}
+
+		if sessionStatus != domain.SessionStatusActive {
+			return errors.New("session is not active")
 		}
 
 		if !containsString(questionIDs, questionID) {
@@ -759,6 +853,10 @@ func (r *interviewRepository) validateSessionQuestionReference(userID, sessionID
 		return errors.New("session not found")
 	}
 
+	if session.Status != domain.SessionStatusActive {
+		return errors.New("session is not active")
+	}
+
 	if !containsString(session.QuestionIDs, questionID) {
 		return errors.New("question not found for session")
 	}
@@ -773,6 +871,112 @@ func (r *interviewRepository) validateSessionQuestionReference(userID, sessionID
 	}
 
 	return nil
+}
+
+func (r *interviewRepository) TouchSessionActivity(userID, sessionID string) error {
+	now := time.Now().UTC()
+
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		tag, err := r.pool.Exec(
+			ctx,
+			`UPDATE app_practice_sessions
+			    SET last_activity_at = $3
+			  WHERE id = $1
+			    AND user_id = $2
+			    AND status = $4`,
+			sessionID,
+			userID,
+			now,
+			domain.SessionStatusActive,
+		)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return errors.New("session is not active")
+		}
+
+		return nil
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	session, exists := r.sessions[sessionID]
+	if !exists || session.UserID != userID {
+		return errors.New("session not found")
+	}
+	if session.Status != domain.SessionStatusActive {
+		return errors.New("session is not active")
+	}
+
+	session.LastActivityAt = now
+	r.sessions[sessionID] = session
+
+	return nil
+}
+
+func (r *interviewRepository) AbandonIdleSessions(idleFor time.Duration) (int64, error) {
+	if idleFor <= 0 {
+		return 0, errors.New("idle duration must be greater than zero")
+	}
+
+	cutoff := time.Now().UTC().Add(-idleFor)
+	now := time.Now().UTC()
+
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		tag, err := r.pool.Exec(
+			ctx,
+			`UPDATE app_practice_sessions
+			    SET status = $1,
+			        completed_at = COALESCE(completed_at, $2),
+			        last_activity_at = $2
+			  WHERE status = $3
+			    AND last_activity_at < $4`,
+			domain.SessionStatusAbandoned,
+			now,
+			domain.SessionStatusActive,
+			cutoff,
+		)
+		if err != nil {
+			return 0, err
+		}
+
+		return tag.RowsAffected(), nil
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var count int64
+	for sessionID, session := range r.sessions {
+		if session.Status != domain.SessionStatusActive {
+			continue
+		}
+
+		lastActivity := session.LastActivityAt
+		if lastActivity.IsZero() {
+			lastActivity = session.CreatedAt
+		}
+
+		if !lastActivity.Before(cutoff) {
+			continue
+		}
+
+		session.Status = domain.SessionStatusAbandoned
+		session.CompletedAt = &now
+		session.LastActivityAt = now
+		r.sessions[sessionID] = session
+		count++
+	}
+
+	return count, nil
 }
 
 func containsString(values []string, target string) bool {

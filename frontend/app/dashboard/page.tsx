@@ -178,6 +178,10 @@ export default function DashboardPage() {
                 <span>{pickLocaleText(locale, "Lihat analisis hasil interview", "View interview result analysis")}</span>
                 <ArrowRight className="h-4 w-4" />
               </Link>
+              <Link href="/billing" className="flex items-center justify-between rounded-[14px] border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100 hover:bg-emerald-400/15">
+                <span>{pickLocaleText(locale, "Beli voice top-up atau upgrade paket", "Buy voice top-up or upgrade plan")}</span>
+                <ArrowRight className="h-4 w-4" />
+              </Link>
             </div>
           </Card>
 

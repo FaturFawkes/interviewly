@@ -16,6 +16,26 @@ This backend can be deployed to Fly.io (recommended) or Railway using Docker.
 - `JWT_SECRET`
 - `JWT_ISSUER`
 
+## Stripe environment variables (if payments enabled)
+
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_SUCCESS_URL`
+- `STRIPE_CANCEL_URL`
+- `STRIPE_CURRENCY` (default: `idr`)
+- `STRIPE_PRICE_STARTER_MONTHLY`
+- `STRIPE_PRICE_PRO_MONTHLY`
+- `STRIPE_PRICE_ELITE_MONTHLY`
+- `STRIPE_PRICE_VOICE_TOPUP_10`
+- `STRIPE_PRICE_VOICE_TOPUP_30`
+- `VOICE_TOPUP_10_AMOUNT_IDR` (fallback nominal jika `STRIPE_PRICE_VOICE_TOPUP_10` kosong)
+- `VOICE_TOPUP_30_AMOUNT_IDR` (fallback nominal jika `STRIPE_PRICE_VOICE_TOPUP_30` kosong)
+
+Notes:
+
+- Voice add-on tidak wajib memiliki Product/Price statis di Stripe. Jika `STRIPE_PRICE_VOICE_TOPUP_*` kosong, backend akan membuat `price_data` dinamis saat checkout.
+- Jika ingin kontrol katalog/harga dari Stripe Dashboard, buat Product+Price di Stripe lalu isi `STRIPE_PRICE_VOICE_TOPUP_10/30`.
+
 ## Run database migrations
 
 ```bash

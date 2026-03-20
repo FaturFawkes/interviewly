@@ -104,6 +104,18 @@ export type SubscriptionStatus = {
   total_sessions: number;
   used_sessions: number;
   remaining_sessions: number;
+  total_text_requests: number;
+  used_text_requests: number;
+  remaining_text_requests: number;
+  text_fup_exceeded: boolean;
+  should_slowdown_response: boolean;
+  suggested_downgrade_model?: string;
+  total_jd_limit: number;
+  used_jd_parses: number;
+  remaining_jd_parses: number;
+  total_voice_topup_minutes: number;
+  used_voice_topup_minutes: number;
+  remaining_voice_topup_minutes: number;
   trial_available: boolean;
   trial_active: boolean;
   trial_duration_hours: number;
@@ -116,12 +128,23 @@ export type SubscriptionStatus = {
 };
 
 export type PaymentPlanID = "starter" | "pro" | "elite";
+export type VoiceTopupPackageCode = "voice_topup_10" | "voice_topup_30";
+export type PaymentCheckoutType = "subscription" | "voice_topup";
 
 export type PaymentCheckoutSession = {
   checkout_url: string;
-  plan_id: PaymentPlanID;
+  checkout_session_id?: string;
+  checkout_type: PaymentCheckoutType;
+  plan_id?: PaymentPlanID;
+  package_code?: VoiceTopupPackageCode;
+  voice_minutes?: number;
   currency: string;
   amount_cents: number;
+};
+
+export type SessionHeartbeatResponse = {
+  session_id: string;
+  status: "ok";
 };
 
 export type AgentFeedbackPayload = {

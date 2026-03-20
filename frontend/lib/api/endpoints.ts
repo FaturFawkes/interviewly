@@ -14,9 +14,11 @@ import type {
   SessionStartMetadata,
   SessionAnswer,
   SessionHistoryResponse,
+  SessionHeartbeatResponse,
   AnalyticsOverview,
   PaymentCheckoutSession,
   PaymentPlanID,
+  VoiceTopupPackageCode,
   SubscriptionStatus,
   VoiceAgentSession,
   VoiceUsageCommitResponse,
@@ -125,11 +127,29 @@ export const api = {
 
   getSessionHistory: (): Promise<SessionHistoryResponse> => apiRequest("/api/session/history"),
 
+  touchSessionActivity: (sessionID: string): Promise<SessionHeartbeatResponse> =>
+    apiRequest("/api/session/heartbeat", {
+      method: "POST",
+      body: { session_id: sessionID },
+    }),
+
   getSubscriptionStatus: (): Promise<SubscriptionStatus> => apiRequest("/api/subscription/status"),
 
   createCheckoutSession: (planID: PaymentPlanID): Promise<PaymentCheckoutSession> =>
-    apiRequest("/payments/checkout", {
+    apiRequest("/api/payments/checkout", {
       method: "POST",
-      body: { plan_id: planID },
+      body: {
+        checkout_type: "subscription",
+        plan_id: planID,
+      },
+    }),
+
+  createVoiceTopupCheckoutSession: (packageCode: VoiceTopupPackageCode): Promise<PaymentCheckoutSession> =>
+    apiRequest("/api/payments/checkout", {
+      method: "POST",
+      body: {
+        checkout_type: "voice_topup",
+        package_code: packageCode,
+      },
     }),
 };

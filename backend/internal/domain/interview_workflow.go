@@ -126,6 +126,7 @@ type PracticeSession struct {
 	Status              string     `json:"status"`
 	Score               int        `json:"score"`
 	CreatedAt           time.Time  `json:"created_at"`
+	LastActivityAt      time.Time  `json:"last_activity_at"`
 	CompletedAt         *time.Time `json:"completed_at,omitempty"`
 }
 
@@ -189,6 +190,8 @@ type InterviewRepository interface {
 	ListFeedbackByUser(userID string) ([]FeedbackRecord, error)
 	SaveProgressMetrics(userID string, averageScore float64, weakAreas []string, sessionsCompleted int) (*ProgressMetrics, error)
 	GetProgressMetrics(userID string) (*ProgressMetrics, error)
+	TouchSessionActivity(userID, sessionID string) error
+	AbandonIdleSessions(idleFor time.Duration) (int64, error)
 }
 
 // InterviewUseCase defines interview workflows.
@@ -208,4 +211,6 @@ type InterviewUseCase interface {
 	AggregateProgress(userID string) (*ProgressMetrics, error)
 	GetProgress(userID string) (*ProgressMetrics, error)
 	GetAnalyticsOverview(userID string) (*AnalyticsOverview, error)
+	TouchSessionActivity(userID, sessionID string) error
+	AbandonIdleSessions(idleFor time.Duration) (int64, error)
 }

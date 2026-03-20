@@ -7,6 +7,7 @@ import { signOut } from "next-auth/react";
 import {
   BarChart3,
   ChevronLeft,
+  CreditCard,
   LayoutDashboard,
   LogOut,
   MessageSquare,
@@ -25,6 +26,7 @@ const navItems = [
   { href: "/dashboard", labelID: "Dasbor", labelEN: "Dashboard", icon: LayoutDashboard },
   { href: "/upload", labelID: "Unggah Resume (CV)", labelEN: "Upload Resume (CV)", icon: Upload },
   { href: "/practice", labelID: "Latihan", labelEN: "Practice", icon: MessageSquare },
+  { href: "/billing", labelID: "Billing & Top-Up", labelEN: "Billing & Top-Up", icon: CreditCard },
   { href: "/analytics", labelID: "Analisis Interview", labelEN: "Interview Analytics", icon: BarChart3 },
 ];
 

@@ -20,6 +20,7 @@ func Setup(
 	feedbackHandler *handler.FeedbackHandler,
 	progressHandler *handler.ProgressHandler,
 	authMiddleware gin.HandlerFunc,
+	rateLimitMiddleware gin.HandlerFunc,
 ) *gin.Engine {
 	r := gin.Default()
 
@@ -31,27 +32,35 @@ func Setup(
 	r.POST("/auth/login", authHandler.Login)
 	r.POST("/auth/social-login", authHandler.SocialLogin)
 	r.POST("/payments/checkout", paymentHandler.CreateCheckoutSession)
+	r.POST("/payments/webhook/stripe", paymentHandler.HandleStripeWebhook)
 
 	api := r.Group("/api")
 	api.Use(authMiddleware)
+	writeLimited := api.Group("")
+	if rateLimitMiddleware != nil {
+		writeLimited.Use(rateLimitMiddleware)
+	}
+
 	api.GET("/me", meHandler.GetMe)
-	api.POST("/job/parse", jobHandler.ParseJobDescription)
-	api.POST("/resume", resumeHandler.SaveResume)
+	writeLimited.POST("/payments/checkout", paymentHandler.CreateCheckoutSession)
+	writeLimited.POST("/job/parse", jobHandler.ParseJobDescription)
+	writeLimited.POST("/resume", resumeHandler.SaveResume)
 	api.GET("/resume", resumeHandler.GetLatestResume)
-	api.POST("/resume/analyze", resumeHandler.AnalyzeResume)
+	writeLimited.POST("/resume/analyze", resumeHandler.AnalyzeResume)
 	api.GET("/resume/download", resumeHandler.DownloadLatestResume)
-	api.POST("/questions/generate", questionHandler.GenerateQuestions)
-	api.POST("/voice/tts", voiceHandler.TextToSpeech)
-	api.POST("/voice/stt", voiceHandler.SpeechToText)
-	api.POST("/voice/agent/session", voiceHandler.CreateAgentSession)
-	api.POST("/voice/usage/commit", voiceHandler.CommitVoiceUsage)
-	api.POST("/session/start", sessionHandler.StartSession)
-	api.POST("/session/answer", sessionHandler.SubmitAnswer)
+	writeLimited.POST("/questions/generate", questionHandler.GenerateQuestions)
+	writeLimited.POST("/voice/tts", voiceHandler.TextToSpeech)
+	writeLimited.POST("/voice/stt", voiceHandler.SpeechToText)
+	writeLimited.POST("/voice/agent/session", voiceHandler.CreateAgentSession)
+	writeLimited.POST("/voice/usage/commit", voiceHandler.CommitVoiceUsage)
+	writeLimited.POST("/session/start", sessionHandler.StartSession)
+	writeLimited.POST("/session/answer", sessionHandler.SubmitAnswer)
+	writeLimited.POST("/session/heartbeat", sessionHandler.TouchSessionActivity)
 	api.POST("/session/complete", sessionHandler.CompleteSession)
 	api.GET("/session/history", sessionHandler.GetSessionHistory)
 	api.GET("/subscription/status", subscriptionHandler.GetStatus)
-	api.POST("/feedback/generate", feedbackHandler.GenerateFeedback)
-	api.POST("/feedback/agent", feedbackHandler.SubmitAgentFeedback)
+	writeLimited.POST("/feedback/generate", feedbackHandler.GenerateFeedback)
+	writeLimited.POST("/feedback/agent", feedbackHandler.SubmitAgentFeedback)
 	api.GET("/progress", progressHandler.GetProgress)
 	api.GET("/analytics/overview", progressHandler.GetAnalyticsOverview)
 
