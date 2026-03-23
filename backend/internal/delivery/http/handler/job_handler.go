@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/interview_app/backend/internal/delivery/http/middleware"
@@ -43,7 +44,11 @@ func (h *JobHandler) ParseJobDescription(c *gin.Context) {
 
 	parsed, err := h.interviewUC.ParseJobDescription(userID, req.JobDescription)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "limit reached") {
+			status = http.StatusPaymentRequired
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 

@@ -175,6 +175,7 @@ func (h *ReviewHandler) GetCoachingSummary(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"session_id":       result.SessionID,
 		"feedback":         result.Feedback,
 		"score":            result.Feedback.Score,
 		"improvement_tips": result.ImprovementPlan.PracticePlan,

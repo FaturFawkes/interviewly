@@ -230,7 +230,10 @@ def main() -> int:
         status, progress = request_json(base_url, "GET", "/api/progress", token=token)
         assert_check(
             "GET /api/progress",
-            status == 200 and "average_score" in progress,
+            status == 200
+            and "interview_progress" in progress
+            and "review_progress" in progress
+            and "average_score" in progress.get("interview_progress", {}),
             f"status={status} body={progress}",
         )
 
@@ -275,6 +278,139 @@ def main() -> int:
             "POST /api/feedback/generate invalid refs",
             status == 400,
             f"status={status} body={invalid_feedback}",
+        )
+
+        # --- Resume ---
+        status, resume = request_json(
+            base_url,
+            "POST",
+            "/api/resume",
+            {"content": "Experienced Go backend engineer with 5 years building microservices."},
+            token=token,
+        )
+        assert_check(
+            "POST /api/resume",
+            status == 200 and bool(resume.get("id")),
+            f"status={status} body={resume}",
+        )
+
+        status, latest_resume = request_json(base_url, "GET", "/api/resume", token=token)
+        assert_check(
+            "GET /api/resume",
+            status == 200 and bool(latest_resume.get("id")),
+            f"status={status} body={latest_resume}",
+        )
+
+        # --- Job parse ---
+        status, parsed_job = request_json(
+            base_url,
+            "POST",
+            "/api/job/parse",
+            {"job_description": "Hiring senior Go engineer for scalable APIs with PostgreSQL and Redis."},
+            token=token,
+        )
+        assert_check(
+            "POST /api/job/parse",
+            status == 200 and bool(parsed_job.get("id")),
+            f"status={status} body={parsed_job}",
+        )
+
+        # --- Subscription status ---
+        status, sub_status = request_json(base_url, "GET", "/api/subscription/status", token=token)
+        assert_check(
+            "GET /api/subscription/status",
+            status == 200
+            and "plan_id" in sub_status
+            and "remaining_sessions" in sub_status
+            and "remaining_voice_minutes" in sub_status,
+            f"status={status} body={sub_status}",
+        )
+
+        # --- Analytics overview ---
+        status, analytics = request_json(base_url, "GET", "/api/analytics/overview", token=token)
+        assert_check(
+            "GET /api/analytics/overview",
+            status == 200 and "average_score" in analytics and "sessions_completed" in analytics,
+            f"status={status} body={analytics}",
+        )
+
+        # --- Review session flow ---
+        status, review_start = request_json(
+            base_url,
+            "POST",
+            "/api/review/start",
+            {
+                "session_type": "review",
+                "input_mode": "text",
+                "interview_language": "en",
+                "input_text": "I was asked about a conflict I handled. I explained the situation but skipped the result.",
+                "interview_prompt": "Tell me about a conflict you handled at work.",
+                "target_role": "Backend Engineer",
+                "target_company": "Tech Corp",
+            },
+            token=token,
+        )
+        review_session_id = review_start.get("session", {}).get("id", "")
+        assert_check(
+            "POST /api/review/start",
+            status == 200 and bool(review_session_id) and "feedback" in review_start,
+            f"status={status} body={review_start}",
+        )
+
+        status, review_respond = request_json(
+            base_url,
+            "POST",
+            "/api/review/respond",
+            {
+                "session_id": review_session_id,
+                "input_text": "The conflict was about deployment timelines. I mediated between the team and PM, and we shipped on time.",
+            },
+            token=token,
+        )
+        assert_check(
+            "POST /api/review/respond",
+            status == 200 and "feedback" in review_respond,
+            f"status={status} body={review_respond}",
+        )
+
+        status, review_end = request_json(
+            base_url,
+            "POST",
+            "/api/review/end",
+            {"session_id": review_session_id},
+            token=token,
+        )
+        assert_check(
+            "POST /api/review/end",
+            status == 200
+            and "improvement_plan" in review_end
+            and "coaching_summary" in review_end,
+            f"status={status} body={review_end}",
+        )
+
+        # --- Coaching summary ---
+        status, coaching = request_json(base_url, "GET", "/api/coaching-summary", token=token)
+        assert_check(
+            "GET /api/coaching-summary",
+            status == 200
+            and "feedback" in coaching
+            and "improvement_plan" in coaching
+            and "session_id" in coaching,
+            f"status={status} body={coaching}",
+        )
+
+        # --- Error: review respond with invalid session ---
+        status, invalid_respond = request_json(
+            base_url,
+            "POST",
+            "/api/review/respond",
+            {"session_id": "not-exist", "input_text": "test"},
+            token=token,
+        )
+        assert_check(
+            "POST /api/review/respond invalid session",
+            status == 400,
+            f"status={status} body={invalid_respond}",
         )
 
         print("\nE2E regression succeeded")

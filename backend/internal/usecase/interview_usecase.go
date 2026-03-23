@@ -632,7 +632,8 @@ func (uc *interviewUseCase) StartReviewSession(userID string, input domain.Revie
 		return nil, err
 	}
 
-	if scoreReady {
+	// For text mode, save progress per turn. Voice mode saves at EndReviewSession.
+	if scoreReady && updated.InputMode != string(domain.InterviewModeVoice) {
 		_, _ = uc.repo.SaveProgressTrackingPoint(userID, updated.ID, domain.ProgressTrackingPoint{
 			Communication: updated.Feedback.Communication,
 			StructureSTAR: updated.Feedback.StructureSTAR,
@@ -758,6 +759,17 @@ func (uc *interviewUseCase) EndReviewSession(userID, sessionID string) (*domain.
 		NextActions:       append([]string{}, plan.PracticePlan...),
 	}
 	_, _ = uc.repo.UpsertCoachingMemory(updatedMemory)
+
+	// For voice sessions, progress tracking is saved here (not per turn).
+	if completed.InputMode == string(domain.InterviewModeVoice) && completed.Feedback.Score > 0 {
+		_, _ = uc.repo.SaveProgressTrackingPoint(userID, completed.ID, domain.ProgressTrackingPoint{
+			Communication: completed.Feedback.Communication,
+			StructureSTAR: completed.Feedback.StructureSTAR,
+			Confidence:    completed.Feedback.Confidence,
+			OverallScore:  completed.Feedback.Score,
+			Notes:         coachingSummary,
+		})
+	}
 
 	return &domain.ReviewEndResult{
 		SessionID:       completed.ID,
