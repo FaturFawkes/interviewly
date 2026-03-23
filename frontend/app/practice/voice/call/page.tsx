@@ -129,6 +129,9 @@ export default function VoiceCallPage() {
   const [showBackExitModal, setShowBackExitModal] = useState(false);
   const [backExitAction, setBackExitAction] = useState<"idle" | "ending" | "pausing">("idle");
   const allowBackNavigationRef = useRef(false);
+  const timerSecondsRef = useRef(timerSeconds);
+  const connectionModeRef = useRef<ConnectionMode>(connectionMode);
+  const sessionIdRef = useRef(session?.id);
   const showTranscriptPanel = !HIDE_TRANSCRIPT_IN_PRODUCTION;
   const selectedInterviewLanguage = resolveSessionLanguage(session?.interview_language);
   const remainingCallSeconds = Math.max(voiceLimitSeconds - timerSeconds, 0);
@@ -176,6 +179,18 @@ export default function VoiceCallPage() {
   useEffect(() => {
     isCallActiveRef.current = isCallActive;
   }, [isCallActive]);
+
+  useEffect(() => {
+    timerSecondsRef.current = timerSeconds;
+  }, [timerSeconds]);
+
+  useEffect(() => {
+    connectionModeRef.current = connectionMode;
+  }, [connectionMode]);
+
+  useEffect(() => {
+    sessionIdRef.current = session?.id;
+  }, [session?.id]);
 
   useEffect(() => {
     if (!feedback) {
@@ -452,18 +467,22 @@ export default function VoiceCallPage() {
   }, []);
 
   const commitVoiceUsageIfNeeded = useCallback(async () => {
-    if (usageCommittedRef.current || !session?.id || timerSeconds <= 0 || connectionMode !== "agent") {
+    const elapsed = timerSecondsRef.current;
+    const mode = connectionModeRef.current;
+    const sessionId = sessionIdRef.current;
+
+    if (usageCommittedRef.current || !sessionId || elapsed <= 0 || mode !== "agent") {
       return;
     }
 
     usageCommittedRef.current = true;
 
     try {
-      await api.commitVoiceUsage(session.id, timerSeconds);
+      await api.commitVoiceUsage(sessionId, elapsed);
     } catch {
       usageCommittedRef.current = false;
     }
-  }, [connectionMode, session?.id, timerSeconds]);
+  }, []);
 
   const finalizeInterviewSession = useCallback(async (options?: {
     redirectToPractice?: boolean;
