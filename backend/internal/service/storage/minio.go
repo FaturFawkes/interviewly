@@ -12,8 +12,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/interview_app/backend/config"
 	"github.com/interview_app/backend/internal/domain"
+	"github.com/interview_app/backend/internal/logger"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"go.uber.org/zap"
 )
 
 type minioResumeStorage struct {
@@ -58,6 +60,13 @@ func (s *minioResumeStorage) UploadResume(userID, fileName, contentType string, 
 		return "", fmt.Errorf("resume file is empty")
 	}
 
+	logger.L().Info("[storage/minio] uploading resume",
+		zap.String("userID", userID),
+		zap.String("fileName", fileName),
+		zap.String("contentType", contentType),
+		zap.Int("sizeBytes", len(data)),
+	)
+
 	userSegment := normalizePathSegment(userID)
 	if userSegment == "" {
 		userSegment = "anonymous"
@@ -93,13 +102,18 @@ func (s *minioResumeStorage) UploadResume(userID, fileName, contentType string, 
 		minio.PutObjectOptions{ContentType: contentType, UserMetadata: userMetadata},
 	)
 	if err != nil {
+		logger.L().Error("[storage/minio] upload failed", zap.String("userID", userID), zap.Error(err))
 		return "", fmt.Errorf("upload resume to minio: %w", err)
 	}
 
-	return fmt.Sprintf("minio://%s/%s", s.bucket, objectKey), nil
+	storagePath := fmt.Sprintf("minio://%s/%s", s.bucket, objectKey)
+	logger.L().Info("[storage/minio] upload success", zap.String("userID", userID), zap.String("path", storagePath))
+	return storagePath, nil
 }
 
 func (s *minioResumeStorage) DownloadResume(minIOPath string) (*domain.ResumeFile, error) {
+	logger.L().Info("[storage/minio] downloading resume", zap.String("path", minIOPath))
+
 	bucket, objectKey, err := parseMinIOPath(minIOPath, s.bucket)
 	if err != nil {
 		return nil, err
@@ -110,12 +124,14 @@ func (s *minioResumeStorage) DownloadResume(minIOPath string) (*domain.ResumeFil
 
 	object, err := s.client.GetObject(ctx, bucket, objectKey, minio.GetObjectOptions{})
 	if err != nil {
+		logger.L().Error("[storage/minio] download failed", zap.String("path", minIOPath), zap.Error(err))
 		return nil, fmt.Errorf("get resume object from minio: %w", err)
 	}
 	defer object.Close()
 
 	info, err := object.Stat()
 	if err != nil {
+		logger.L().Error("[storage/minio] stat failed", zap.String("path", minIOPath), zap.Error(err))
 		return nil, fmt.Errorf("stat resume object from minio: %w", err)
 	}
 
@@ -130,6 +146,7 @@ func (s *minioResumeStorage) DownloadResume(minIOPath string) (*domain.ResumeFil
 		contentType = fallbackContentType(fileName)
 	}
 
+	logger.L().Info("[storage/minio] download success", zap.String("path", minIOPath), zap.String("fileName", fileName), zap.Int("sizeBytes", len(data)))
 	return &domain.ResumeFile{
 		FileName:    fileName,
 		ContentType: contentType,
@@ -138,6 +155,8 @@ func (s *minioResumeStorage) DownloadResume(minIOPath string) (*domain.ResumeFil
 }
 
 func (s *minioResumeStorage) DeleteResume(minIOPath string) error {
+	logger.L().Info("[storage/minio] deleting resume", zap.String("path", minIOPath))
+
 	bucket, objectKey, err := parseMinIOPath(minIOPath, s.bucket)
 	if err != nil {
 		return err
@@ -147,9 +166,11 @@ func (s *minioResumeStorage) DeleteResume(minIOPath string) error {
 	defer cancel()
 
 	if err := s.client.RemoveObject(ctx, bucket, objectKey, minio.RemoveObjectOptions{}); err != nil {
+		logger.L().Error("[storage/minio] delete failed", zap.String("path", minIOPath), zap.Error(err))
 		return fmt.Errorf("delete resume object from minio: %w", err)
 	}
 
+	logger.L().Info("[storage/minio] delete success", zap.String("path", minIOPath))
 	return nil
 }
 
@@ -162,11 +183,14 @@ func (s *minioResumeStorage) ensureBucket(region string) error {
 		return fmt.Errorf("check minio bucket %q: %w", s.bucket, err)
 	}
 	if exists {
+		logger.L().Info("[storage/minio] bucket already exists", zap.String("bucket", s.bucket))
 		return nil
 	}
 
+	logger.L().Info("[storage/minio] creating bucket", zap.String("bucket", s.bucket), zap.String("region", region))
 	err = s.client.MakeBucket(ctx, s.bucket, minio.MakeBucketOptions{Region: region})
 	if err == nil {
+		logger.L().Info("[storage/minio] bucket created", zap.String("bucket", s.bucket))
 		return nil
 	}
 

@@ -196,50 +196,61 @@ func (uc *interviewUseCase) GetLatestResumeAnalysis(userID, language string) (*d
 	}
 
 	analysisLanguage := normalizeResumeAnalysisLanguage(language)
+
+	// Fetch the absolute latest analysis (any language) as the source of truth for freshness.
+	latestRecord, latestErr := uc.repo.GetLatestResumeAnalysis(userID)
+	if latestErr != nil {
+		return nil, latestErr
+	}
+	if latestRecord == nil {
+		return nil, nil
+	}
+
+	// Only use a cached language-specific record when it is based on the same CV version.
 	record, err := uc.repo.GetLatestResumeAnalysisByLanguage(userID, analysisLanguage)
 	if err != nil {
 		return nil, err
 	}
-	if record == nil {
-		latestRecord, latestErr := uc.repo.GetLatestResumeAnalysis(userID)
-		if latestErr != nil {
-			return nil, latestErr
+	if record != nil && record.ContentHash == latestRecord.ContentHash {
+		cached := resumeAnalysisFromRecord(record)
+		// Guard against corrupted cache: a record keyed as Indonesian but containing
+		// English content. For English targets we cannot reliably detect corruption,
+		// so we only verify the Indonesian case.
+		if analysisLanguage != "id" || looksLikeIndonesianResumeAnalysis(cached) {
+			return cached, nil
 		}
-		if latestRecord == nil {
-			return nil, nil
-		}
-
-		translated := resumeAnalysisFromRecord(latestRecord)
-		translated = uc.ensureResumeAnalysisLanguage(translated, analysisLanguage)
-		if translated == nil {
-			return nil, nil
-		}
-
-		_, _ = uc.repo.SaveResumeAnalysis(
-			userID,
-			latestRecord.ResumeID,
-			latestRecord.ContentHash,
-			modelKeyWithLanguage(latestRecord.Model, analysisLanguage),
-			translated,
-		)
-
-		return translated, nil
+		// Corrupted Indonesian cache — fall through to re-translate.
 	}
 
-	analysis := resumeAnalysisFromRecord(record)
-	adjusted := uc.ensureResumeAnalysisLanguage(analysis, analysisLanguage)
-	if adjusted != nil && !sameResumeAnalysisContent(analysis, adjusted) {
-		_, _ = uc.repo.SaveResumeAnalysis(
-			userID,
-			record.ResumeID,
-			record.ContentHash,
-			modelKeyWithLanguage(record.Model, analysisLanguage),
-			adjusted,
-		)
-		return adjusted, nil
+	// No up-to-date language-specific record — use the latest and translate if needed.
+	analysis := resumeAnalysisFromRecord(latestRecord)
+
+	// Determine the actual language: prefer the model key, but fall back to content
+	// inspection when the key claims Indonesian but the content is clearly not.
+	recordLanguage := extractLanguageFromModelKey(latestRecord.Model)
+	if recordLanguage == "id" && !looksLikeIndonesianResumeAnalysis(analysis) {
+		// Corrupted record: keyed as Indonesian but contains non-Indonesian content.
+		// Treat its content as English so the translation branch can handle it.
+		recordLanguage = "en"
+	}
+	if recordLanguage == analysisLanguage {
+		return analysis, nil
 	}
 
-	return analysis, nil
+	translated, translErr := uc.translateResumeAnalysisToLanguage(analysis, analysisLanguage)
+	if translErr != nil || translated == nil {
+		return analysis, nil
+	}
+
+	_, _ = uc.repo.SaveResumeAnalysis(
+		userID,
+		latestRecord.ResumeID,
+		latestRecord.ContentHash,
+		modelKeyWithLanguage(latestRecord.Model, analysisLanguage),
+		translated,
+	)
+
+	return translated, nil
 }
 
 func (uc *interviewUseCase) DownloadLatestResume(userID string) (*domain.ResumeFile, error) {
@@ -1166,33 +1177,14 @@ func looksLikeIndonesianResumeAnalysis(analysis *domain.ResumeAIAnalysis) bool {
 	return false
 }
 
-func sameResumeAnalysisContent(a, b *domain.ResumeAIAnalysis) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
 
-	if strings.TrimSpace(a.Summary) != strings.TrimSpace(b.Summary) {
-		return false
+func extractLanguageFromModelKey(model string) string {
+	lower := strings.ToLower(model)
+	if marker := strings.LastIndex(lower, "|lang:"); marker >= 0 {
+		suffix := strings.TrimSpace(lower[marker+6:])
+		return normalizeResumeAnalysisLanguage(suffix)
 	}
-	if strings.TrimSpace(a.Response) != strings.TrimSpace(b.Response) {
-		return false
-	}
-	if len(a.Highlights) != len(b.Highlights) || len(a.Recommendations) != len(b.Recommendations) {
-		return false
-	}
-
-	for index := range a.Highlights {
-		if strings.TrimSpace(a.Highlights[index]) != strings.TrimSpace(b.Highlights[index]) {
-			return false
-		}
-	}
-	for index := range a.Recommendations {
-		if strings.TrimSpace(a.Recommendations[index]) != strings.TrimSpace(b.Recommendations[index]) {
-			return false
-		}
-	}
-
-	return true
+	return string(domain.InterviewLanguageEnglish)
 }
 
 func modelKeyWithLanguage(model, language string) string {

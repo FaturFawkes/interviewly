@@ -17,9 +17,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/interview_app/backend/config"
+	"github.com/interview_app/backend/internal/logger"
 	"github.com/interview_app/backend/internal/service/subscription"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.uber.org/zap"
 )
 
 const (
@@ -227,6 +229,8 @@ func (s *Service) CreateSubscriptionCheckoutSession(planID, userID string) (*Che
 		return nil, fmt.Errorf("stripe payment service is not configured")
 	}
 
+	logger.L().Info("[payment] creating subscription checkout", zap.String("planID", planID), zap.String("userID", userID))
+
 	plan, ok := s.PlanByID(planID)
 	if !ok {
 		return nil, fmt.Errorf("invalid plan")
@@ -257,9 +261,11 @@ func (s *Service) CreateSubscriptionCheckoutSession(planID, userID string) (*Che
 
 	payload, err := s.createStripeCheckout(form)
 	if err != nil {
+		logger.L().Error("[payment] subscription checkout creation failed", zap.String("planID", plan.ID), zap.Error(err))
 		return nil, err
 	}
 
+	logger.L().Info("[payment] subscription checkout created", zap.String("planID", plan.ID), zap.String("sessionID", payload.ID))
 	return &CheckoutResult{
 		CheckoutURL:       payload.URL,
 		CheckoutSessionID: payload.ID,
@@ -282,6 +288,8 @@ func (s *Service) CreateVoiceTopupCheckoutSession(userID, packageCode string) (*
 	if trimmedUserID == "" {
 		return nil, fmt.Errorf("user id is required")
 	}
+
+	logger.L().Info("[payment] creating voice topup checkout", zap.String("userID", trimmedUserID), zap.String("packageCode", packageCode))
 
 	pkg, ok := s.VoiceTopupPackageByCode(packageCode)
 	if !ok {
@@ -316,6 +324,7 @@ func (s *Service) CreateVoiceTopupCheckoutSession(userID, packageCode string) (*
 
 	payload, err := s.createStripeCheckout(form)
 	if err != nil {
+		logger.L().Error("[payment] voice topup checkout creation failed", zap.String("userID", trimmedUserID), zap.String("packageCode", pkg.Code), zap.Error(err))
 		_ = s.markTopupOrderFailed(orderID, err)
 		return nil, err
 	}
@@ -324,6 +333,13 @@ func (s *Service) CreateVoiceTopupCheckoutSession(userID, packageCode string) (*
 		return nil, err
 	}
 
+	logger.L().Info("[payment] voice topup checkout created",
+		zap.String("userID", trimmedUserID),
+		zap.String("packageCode", pkg.Code),
+		zap.String("orderID", orderID),
+		zap.String("sessionID", payload.ID),
+		zap.Int("voiceMins", pkg.VoiceMins),
+	)
 	return &CheckoutResult{
 		CheckoutURL:       payload.URL,
 		CheckoutSessionID: payload.ID,
@@ -344,6 +360,7 @@ func (s *Service) HandleStripeWebhook(signatureHeader string, payload []byte) er
 	}
 
 	if !verifyStripeSignature(payload, signatureHeader, s.webhookSecret) {
+		logger.L().Warn("[payment] webhook signature verification failed", zap.Int("payloadBytes", len(payload)))
 		return fmt.Errorf("invalid stripe signature")
 	}
 
@@ -355,11 +372,15 @@ func (s *Service) HandleStripeWebhook(signatureHeader string, payload []byte) er
 		return fmt.Errorf("stripe event id is empty")
 	}
 
+	log := logger.L()
+	log.Info("[payment] webhook received", zap.String("eventID", event.ID), zap.String("eventType", event.Type))
+
 	shouldProcess, err := s.beginBillingEvent(event.ID, event.Type, payload)
 	if err != nil {
 		return err
 	}
 	if !shouldProcess {
+		log.Info("[payment] webhook skipped (already processed or ignored)", zap.String("eventID", event.ID))
 		return nil
 	}
 
@@ -368,14 +389,19 @@ func (s *Service) HandleStripeWebhook(signatureHeader string, payload []byte) er
 
 	switch strings.TrimSpace(event.Type) {
 	case "checkout.session.completed":
+		log.Info("[payment] processing checkout.session.completed", zap.String("eventID", event.ID))
 		err = s.handleCheckoutSessionCompleted(event)
 	default:
+		log.Info("[payment] webhook event ignored", zap.String("eventType", event.Type), zap.String("eventID", event.ID))
 		finalStatus = billingStatusIgnored
 	}
 
 	if err != nil {
+		log.Error("[payment] webhook processing failed", zap.String("eventID", event.ID), zap.String("eventType", event.Type), zap.Error(err))
 		finalStatus = billingStatusFailed
 		finalErrorMessage = err.Error()
+	} else if finalStatus == billingStatusProcessed {
+		log.Info("[payment] webhook processed successfully", zap.String("eventID", event.ID), zap.String("eventType", event.Type))
 	}
 
 	if updateErr := s.finishBillingEvent(event.ID, finalStatus, finalErrorMessage); updateErr != nil {
@@ -413,7 +439,13 @@ func (s *Service) handleCheckoutSessionCompleted(event stripeEvent) error {
 			return fmt.Errorf("missing subscription metadata in checkout session")
 		}
 
+		logger.L().Info("[payment] applying paid plan", zap.String("userID", userID), zap.String("planID", planID), zap.String("sessionID", checkoutSession.ID))
 		_, err := s.subscriptionService.ApplyPaidPlan(userID, planID)
+		if err != nil {
+			logger.L().Error("[payment] apply paid plan failed", zap.String("userID", userID), zap.String("planID", planID), zap.Error(err))
+		} else {
+			logger.L().Info("[payment] paid plan applied successfully", zap.String("userID", userID), zap.String("planID", planID))
+		}
 		return err
 
 	case checkoutTypeVoiceTopup:
@@ -421,6 +453,7 @@ func (s *Service) handleCheckoutSessionCompleted(event stripeEvent) error {
 			return nil
 		}
 
+		logger.L().Info("[payment] crediting voice topup", zap.String("sessionID", checkoutSession.ID))
 		return s.creditTopupOrderFromCheckout(checkoutSession)
 
 	default:
@@ -536,6 +569,12 @@ updated_at = NOW()
 		return err
 	}
 
+	logger.L().Info("[payment] voice topup credited",
+		zap.String("userID", userID),
+		zap.String("packageCode", packageCode),
+		zap.Int("purchasedMinutes", purchasedMinutes),
+		zap.String("orderID", topupOrderID),
+	)
 	return nil
 }
 

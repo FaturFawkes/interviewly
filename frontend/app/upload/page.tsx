@@ -120,6 +120,7 @@ export default function UploadPage() {
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingLatest, setLoadingLatest] = useState(false);
+  const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const effectiveResume = resumeText.trim();
@@ -137,7 +138,35 @@ export default function UploadPage() {
     };
   }, [effectiveResume]);
 
-  const loadLatestResumeAndAnalysis = useCallback(async () => {
+  // Fetch only the analysis — re-runs whenever locale changes.
+  // Clears stale content immediately so wrong-language text never lingers.
+  const loadAnalysis = useCallback(async () => {
+    setLoadingAnalysis(true);
+    setAnalysisSummary("");
+    setAnalysisResponse("");
+    setAnalysisHighlights([]);
+    setAnalysisRecommendations([]);
+
+    try {
+      const analysis = await api.getLatestResumeAnalysis(locale);
+      setAnalysisSummary(analysis.summary ?? "");
+      setAnalysisResponse(analysis.response ?? "");
+      setAnalysisHighlights(Array.isArray(analysis.highlights) ? analysis.highlights : []);
+      setAnalysisRecommendations(Array.isArray(analysis.recommendations) ? analysis.recommendations : []);
+    } catch (err) {
+      const rawMessage = err instanceof Error ? err.message : "";
+      const message = localizeUploadError(locale, rawMessage);
+      const lower = message.toLowerCase();
+      if (!lower.includes("not found")) {
+        setError(message);
+      }
+    } finally {
+      setLoadingAnalysis(false);
+    }
+  }, [locale]);
+
+  // Fetch resume content once on mount (locale-independent).
+  const loadLatestResume = useCallback(async () => {
     setLoadingLatest(true);
     setError(null);
 
@@ -146,41 +175,33 @@ export default function UploadPage() {
       const normalizedResume = latestResume.content.trim();
       setResumeText(normalizedResume);
       setLatestResumePreview(normalizedResume.slice(0, 2200));
-
-      const analysis = normalizeAnalysisForLocale(locale, await api.getLatestResumeAnalysis(locale));
-      setAnalysisSummary(analysis.summary ?? "");
-      setAnalysisResponse(analysis.response ?? "");
-      setAnalysisHighlights(Array.isArray(analysis.highlights) ? analysis.highlights : []);
-      setAnalysisRecommendations(Array.isArray(analysis.recommendations) ? analysis.recommendations : []);
       setSaved(true);
     } catch (err) {
       const rawMessage = err instanceof Error ? err.message : pickLocaleText(locale, "Gagal memuat CV terbaru.", "Failed to load latest CV.");
       const message = localizeUploadError(locale, rawMessage);
-      const lowerMessage = message.toLowerCase();
+      const lower = message.toLowerCase();
 
-      if (lowerMessage.includes("resume analysis not found")) {
-        setAnalysisSummary("");
-        setAnalysisResponse("");
-        setAnalysisHighlights([]);
-        setAnalysisRecommendations([]);
-      } else if (lowerMessage.includes("resume not found") || lowerMessage.includes("not found")) {
+      if (lower.includes("resume not found") || lower.includes("not found")) {
         setSaved(false);
         setLatestResumePreview("");
-        setAnalysisSummary("");
-        setAnalysisResponse("");
-        setAnalysisHighlights([]);
-        setAnalysisRecommendations([]);
       } else {
         setError(message);
       }
     } finally {
       setLoadingLatest(false);
     }
-  }, [locale]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  // Load resume once on mount.
   useEffect(() => {
-    void loadLatestResumeAndAnalysis();
-  }, [loadLatestResumeAndAnalysis]);
+    void loadLatestResume();
+  }, [loadLatestResume]);
+
+  // Re-fetch analysis whenever locale changes (clears stale content first).
+  useEffect(() => {
+    void loadAnalysis();
+  }, [loadAnalysis]);
 
   async function handleAnalyze() {
     if (!effectiveResume) {
@@ -198,13 +219,10 @@ export default function UploadPage() {
         await api.saveResume(effectiveResume, locale);
       }
 
-      const analysis = normalizeAnalysisForLocale(locale, await api.analyzeResume(undefined, locale));
-      setAnalysisSummary(analysis.summary ?? "");
-      setAnalysisResponse(analysis.response ?? "");
-      setAnalysisHighlights(Array.isArray(analysis.highlights) ? analysis.highlights : []);
-      setAnalysisRecommendations(Array.isArray(analysis.recommendations) ? analysis.recommendations : []);
+      await api.analyzeResume(undefined, locale);
       setLatestResumePreview(effectiveResume.slice(0, 2200));
       setSaved(true);
+      await loadAnalysis();
     } catch (err) {
       const rawMessage = err instanceof Error ? err.message : pickLocaleText(locale, "Analisis gagal.", "Analysis failed.");
       setError(localizeUploadError(locale, rawMessage));
@@ -323,28 +341,34 @@ export default function UploadPage() {
           </div>
 
           <div className="mt-5 space-y-4">
-            <div className="rounded-[16px] border border-white/10 bg-white/5 p-4">
-              <p className="text-sm font-semibold text-white">{pickLocaleText(locale, "Ringkasan", "Summary")}</p>
-              <p className="mt-2 text-sm text-white/85">{analysisSummary || pickLocaleText(locale, "Belum ada ringkasan analisis.", "No analysis summary yet.")}</p>
-            </div>
+            {loadingAnalysis ? (
+              <p className="text-sm text-muted">{pickLocaleText(locale, "Memuat analisis...", "Loading analysis...")}</p>
+            ) : (
+              <>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-sm font-semibold text-white">{pickLocaleText(locale, "Ringkasan", "Summary")}</p>
+                  <p className="mt-2 text-sm text-white/85">{analysisSummary || pickLocaleText(locale, "Belum ada ringkasan analisis.", "No analysis summary yet.")}</p>
+                </div>
 
-            <div className="rounded-[16px] border border-white/10 bg-white/5 p-4">
-              <p className="text-sm font-semibold text-white">{pickLocaleText(locale, "Respons", "Response")}</p>
-              <p className="mt-2 text-sm text-white/85">{analysisResponse || pickLocaleText(locale, "Belum ada respons analisis.", "No analysis response yet.")}</p>
-            </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-sm font-semibold text-white">{pickLocaleText(locale, "Respons", "Response")}</p>
+                  <p className="mt-2 text-sm text-white/85">{analysisResponse || pickLocaleText(locale, "Belum ada respons analisis.", "No analysis response yet.")}</p>
+                </div>
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              <InfoColumn
-                title={pickLocaleText(locale, "Sorotan", "Highlights")}
-                items={analysisHighlights}
-                empty={pickLocaleText(locale, "Belum ada highlight analisis.", "No analysis highlights yet.")}
-              />
-              <InfoColumn
-                title={pickLocaleText(locale, "Rekomendasi", "Recommendations")}
-                items={analysisRecommendations}
-                empty={pickLocaleText(locale, "Belum ada rekomendasi analisis.", "No analysis recommendations yet.")}
-              />
-            </div>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <InfoColumn
+                    title={pickLocaleText(locale, "Sorotan", "Highlights")}
+                    items={analysisHighlights}
+                    empty={pickLocaleText(locale, "Belum ada highlight analisis.", "No analysis highlights yet.")}
+                  />
+                  <InfoColumn
+                    title={pickLocaleText(locale, "Rekomendasi", "Recommendations")}
+                    items={analysisRecommendations}
+                    empty={pickLocaleText(locale, "Belum ada rekomendasi analisis.", "No analysis recommendations yet.")}
+                  />
+                </div>
+              </>
+            )}
           </div>
 
           <div className="mt-5">

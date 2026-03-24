@@ -12,6 +12,8 @@ import (
 
 	"github.com/interview_app/backend/config"
 	"github.com/interview_app/backend/internal/domain"
+	"github.com/interview_app/backend/internal/logger"
+	"go.uber.org/zap"
 )
 
 // Service is a lightweight AI abstraction layer that can later be swapped with real providers.
@@ -63,6 +65,8 @@ func (s *Service) ParseJobDescriptionWithModel(jobDescription, modelOverride str
 	if s.useRemoteProvider() {
 		if remote, err := s.remoteParseJobDescriptionWithModel(jobDescription, modelOverride); err == nil {
 			return remote, nil
+		} else {
+			logger.L().Warn("[ai] remoteParseJobDescription with model override failed, falling back to local", zap.Error(err))
 		}
 	}
 
@@ -140,6 +144,8 @@ func (s *Service) ParseJobDescription(jobDescription string) (*domain.JobInsight
 	if s.useRemoteProvider() {
 		if remote, err := s.remoteParseJobDescription(jobDescription); err == nil {
 			return remote, nil
+		} else {
+			logger.L().Warn("[ai] remoteParseJobDescription failed, falling back to local", zap.Error(err))
 		}
 	}
 
@@ -179,6 +185,8 @@ func (s *Service) GenerateQuestions(
 			interviewDifficulty,
 		); err == nil {
 			return sanitizeGeneratedQuestionsByMode(remote, interviewMode), nil
+		} else {
+			logger.L().Warn("[ai] remoteGenerateQuestions failed, falling back to local", zap.Error(err))
 		}
 	}
 
@@ -1039,10 +1047,21 @@ func (s *Service) chatCompletion(systemPrompt, userPrompt string) (string, error
 }
 
 func (s *Service) chatCompletionWithModel(systemPrompt, userPrompt, modelOverride string) (string, error) {
+	return s.chatCompletionWithModelAndTokens(systemPrompt, userPrompt, modelOverride, 700)
+}
+
+func (s *Service) chatCompletionWithModelAndTokens(systemPrompt, userPrompt, modelOverride string, maxTokens int) (string, error) {
 	model := strings.TrimSpace(modelOverride)
 	if model == "" {
 		model = s.model
 	}
+
+	logger.L().Info("[ai] chat completion request",
+		zap.String("provider", s.provider),
+		zap.String("model", model),
+		zap.Int("maxTokens", maxTokens),
+		zap.Int("promptLen", len(userPrompt)),
+	)
 
 	requestPayload := openAIChatRequest{
 		Model: model,
@@ -1051,7 +1070,7 @@ func (s *Service) chatCompletionWithModel(systemPrompt, userPrompt, modelOverrid
 			{Role: "user", Content: userPrompt},
 		},
 		Temperature: 0.2,
-		MaxTokens:   700,
+		MaxTokens:   maxTokens,
 	}
 
 	body, err := json.Marshal(requestPayload)
@@ -1068,6 +1087,7 @@ func (s *Service) chatCompletionWithModel(systemPrompt, userPrompt, modelOverrid
 
 	response, err := s.httpClient.Do(request)
 	if err != nil {
+		logger.L().Error("[ai] chat completion request failed", zap.String("provider", s.provider), zap.String("model", model), zap.Error(err))
 		return "", err
 	}
 	defer response.Body.Close()
@@ -1078,6 +1098,7 @@ func (s *Service) chatCompletionWithModel(systemPrompt, userPrompt, modelOverrid
 	}
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		logger.L().Error("[ai] chat completion error", zap.String("provider", s.provider), zap.String("model", model), zap.Int("status", response.StatusCode))
 		return "", fmt.Errorf("ai provider error: %s", string(responseBody))
 	}
 
@@ -1089,6 +1110,11 @@ func (s *Service) chatCompletionWithModel(systemPrompt, userPrompt, modelOverrid
 		return "", fmt.Errorf("ai provider returned no choices")
 	}
 
+	logger.L().Info("[ai] chat completion success",
+		zap.String("provider", s.provider),
+		zap.String("model", model),
+		zap.Int("responseLen", len(parsed.Choices[0].Message.Content)),
+	)
 	return parsed.Choices[0].Message.Content, nil
 }
 
@@ -1253,10 +1279,15 @@ func (s *Service) remoteAnalyzeResume(resumeText string) (*domain.ResumeAIAnalys
 }
 
 func (s *Service) remoteAnalyzeResumeWithModel(resumeText, modelOverride string) (*domain.ResumeAIAnalysis, error) {
-	systemPrompt := "You are an interview coaching assistant. Return only strict JSON."
-	userPrompt := "Analyze the following CV and return JSON with keys summary (string), response (string), highlights (array of concise strings), recommendations (array of actionable strings). Keep content concise and practical.\n\nCV:\n" + resumeText
+	systemPrompt := "You are an expert career coach and resume reviewer specializing in interview preparation. Analyze the provided CV thoroughly and give specific, personalized feedback based on the actual content of the CV — not generic advice. Return only strict JSON with no markdown or additional text."
+	userPrompt := "Analyze the following CV and return a JSON object with exactly these keys:\n" +
+		"- \"summary\": 2-3 sentences describing this specific candidate's professional profile, seniority level, and key areas of expertise based on what is actually written in the CV\n" +
+		"- \"response\": 2-3 sentences of direct coaching insight about this candidate's interview readiness, referencing specific roles, projects, or experience mentioned in their CV\n" +
+		"- \"highlights\": array of 4-6 specific strengths found in this CV — include actual technologies, measurable achievements, domain expertise, or notable qualities that stand out\n" +
+		"- \"recommendations\": array of 4-5 specific, actionable improvements tailored to the gaps or weak areas in this particular CV\n\n" +
+		"Every point must be grounded in the actual CV content. Be specific and avoid generic statements.\n\nCV:\n" + resumeText
 
-	raw, err := s.chatCompletionWithModel(systemPrompt, userPrompt, modelOverride)
+	raw, err := s.chatCompletionWithModelAndTokens(systemPrompt, userPrompt, modelOverride, 1500)
 	if err != nil {
 		return nil, err
 	}
@@ -1497,11 +1528,17 @@ func ensureTranslationQuality(source, translated *domain.ResumeAIAnalysis, targe
 		return translateResumeAnalysisLocally(source, targetLanguage)
 	}
 
-	if targetLanguage == "id" && !looksLikeIndonesianResumeAnalysis(translated) {
+	// If the translation produced empty content, fall back.
+	if strings.TrimSpace(translated.Summary) == "" && strings.TrimSpace(translated.Response) == "" {
 		return translateResumeAnalysisLocally(source, targetLanguage)
 	}
 
-	if targetLanguage == "en" && !looksLikeEnglishResumeAnalysis(translated) {
+	// Only reject the translation if it is clearly in the WRONG language.
+	// We avoid rejecting valid AI-generated text that merely doesn't match template phrases.
+	if targetLanguage == "en" && looksLikeIndonesianResumeAnalysis(translated) {
+		return translateResumeAnalysisLocally(source, targetLanguage)
+	}
+	if targetLanguage == "id" && !looksLikeIndonesianResumeAnalysis(translated) {
 		return translateResumeAnalysisLocally(source, targetLanguage)
 	}
 
@@ -1531,41 +1568,16 @@ func looksLikeIndonesianResumeAnalysis(analysis *domain.ResumeAIAnalysis) bool {
 		"pencapaian",
 		"kepemimpinan",
 		"rekomendasi",
-		// removed to avoid false-positive detection of an artificial marker
-	}
-
-	for _, marker := range indicators {
-		if strings.Contains(blob, marker) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func looksLikeEnglishResumeAnalysis(analysis *domain.ResumeAIAnalysis) bool {
-	if analysis == nil {
-		return false
-	}
-
-	blob := strings.ToLower(strings.TrimSpace(strings.Join([]string{
-		analysis.Summary,
-		analysis.Response,
-		strings.Join(analysis.Highlights, " "),
-		strings.Join(analysis.Recommendations, " "),
-	}, " ")))
-
-	if blob == "" {
-		return false
-	}
-
-	indicators := []string{
-		"the cv indicates",
-		"overall, the profile",
-		"highlight measurable impact",
-		"tailor headline",
-		"add 2-3 quantified achievements",
-		"leadership outcomes",
+		"pengalaman",
+		"keterampilan",
+		"perusahaan",
+		"posisi",
+		"kandidat",
+		"yang ",
+		"dengan ",
+		"untuk ",
+		"dalam ",
+		"dari ",
 	}
 
 	for _, marker := range indicators {

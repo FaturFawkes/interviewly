@@ -17,6 +17,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/interview_app/backend/config"
 	"github.com/interview_app/backend/internal/domain"
+	"github.com/interview_app/backend/internal/logger"
+	"go.uber.org/zap"
 )
 
 type supabaseResumeStorage struct {
@@ -79,6 +81,13 @@ func (s *supabaseResumeStorage) UploadResume(userID, fileName, contentType strin
 		return "", fmt.Errorf("resume file is empty")
 	}
 
+	logger.L().Info("[storage/supabase] uploading resume",
+		zap.String("userID", userID),
+		zap.String("fileName", fileName),
+		zap.String("contentType", contentType),
+		zap.Int("sizeBytes", len(data)),
+	)
+
 	userSegment := normalizePathSegment(userID)
 	if userSegment == "" {
 		userSegment = "anonymous"
@@ -108,13 +117,18 @@ func (s *supabaseResumeStorage) UploadResume(userID, fileName, contentType strin
 		ContentType: &contentType,
 	})
 	if err != nil {
+		logger.L().Error("[storage/supabase] upload failed", zap.String("userID", userID), zap.Error(err))
 		return "", fmt.Errorf("upload resume to supabase s3: %w", err)
 	}
 
-	return fmt.Sprintf("supabase://%s/%s", s.bucket, objectKey), nil
+	storagePath := fmt.Sprintf("supabase://%s/%s", s.bucket, objectKey)
+	logger.L().Info("[storage/supabase] upload success", zap.String("userID", userID), zap.String("path", storagePath))
+	return storagePath, nil
 }
 
 func (s *supabaseResumeStorage) DownloadResume(storagePath string) (*domain.ResumeFile, error) {
+	logger.L().Info("[storage/supabase] downloading resume", zap.String("path", storagePath))
+
 	bucket, objectKey, err := parseSupabasePath(storagePath, s.bucket)
 	if err != nil {
 		return nil, err
@@ -128,6 +142,7 @@ func (s *supabaseResumeStorage) DownloadResume(storagePath string) (*domain.Resu
 		Key:    &objectKey,
 	})
 	if err != nil {
+		logger.L().Error("[storage/supabase] download failed", zap.String("path", storagePath), zap.Error(err))
 		return nil, fmt.Errorf("download resume from supabase s3: %w", err)
 	}
 	defer resp.Body.Close()
@@ -147,6 +162,7 @@ func (s *supabaseResumeStorage) DownloadResume(storagePath string) (*domain.Resu
 		contentType = fallbackContentType(fileName)
 	}
 
+	logger.L().Info("[storage/supabase] download success", zap.String("path", storagePath), zap.String("fileName", fileName), zap.Int("sizeBytes", len(data)))
 	return &domain.ResumeFile{
 		FileName:    fileName,
 		ContentType: contentType,
@@ -155,6 +171,8 @@ func (s *supabaseResumeStorage) DownloadResume(storagePath string) (*domain.Resu
 }
 
 func (s *supabaseResumeStorage) DeleteResume(storagePath string) error {
+	logger.L().Info("[storage/supabase] deleting resume", zap.String("path", storagePath))
+
 	bucket, objectKey, err := parseSupabasePath(storagePath, s.bucket)
 	if err != nil {
 		return err
@@ -168,9 +186,11 @@ func (s *supabaseResumeStorage) DeleteResume(storagePath string) error {
 		Key:    &objectKey,
 	})
 	if err != nil {
+		logger.L().Error("[storage/supabase] delete failed", zap.String("path", storagePath), zap.Error(err))
 		return fmt.Errorf("delete resume from supabase s3: %w", err)
 	}
 
+	logger.L().Info("[storage/supabase] delete success", zap.String("path", storagePath))
 	return nil
 }
 

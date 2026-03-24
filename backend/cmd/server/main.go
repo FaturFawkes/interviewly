@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/interview_app/backend/config"
@@ -13,6 +12,7 @@ import (
 	"github.com/interview_app/backend/internal/domain"
 	"github.com/interview_app/backend/internal/infrastructure/cache"
 	"github.com/interview_app/backend/internal/infrastructure/database"
+	"github.com/interview_app/backend/internal/logger"
 	"github.com/interview_app/backend/internal/repository"
 	"github.com/interview_app/backend/internal/service/ai"
 	"github.com/interview_app/backend/internal/service/notification"
@@ -22,11 +22,17 @@ import (
 	"github.com/interview_app/backend/internal/service/voice"
 	"github.com/interview_app/backend/internal/usecase"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.uber.org/zap"
 )
 
 func main() {
 	// Load configuration
 	cfg := config.Load()
+	logger.Init(cfg.Env)
+	defer logger.Sync()
+
+	log := logger.L()
+
 	postgresPool, postgresCleanup := setupPostgres(cfg)
 	if postgresCleanup != nil {
 		defer postgresCleanup()
@@ -87,36 +93,38 @@ func main() {
 	startIdleSessionSweeper(cfg, interviewUC)
 
 	addr := fmt.Sprintf(":%s", cfg.ServerPort)
-	log.Printf("Server starting on %s (env: %s)", addr, cfg.Env)
+	log.Info("Server starting", zap.String("addr", addr), zap.String("env", cfg.Env))
 
 	if err := r.Run(addr); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+		log.Fatal("Failed to start server", zap.Error(err))
 	}
 }
 
 func setupPostgres(cfg *config.Config) (*pgxpool.Pool, func()) {
+	log := logger.L()
 	pool, err := database.NewPostgresPool(cfg)
 	if err != nil {
-		log.Printf("PostgreSQL not initialized: %v", err)
+		log.Warn("PostgreSQL not initialized", zap.Error(err))
 		return nil, nil
 	}
 	if pool == nil {
-		log.Println("PostgreSQL not initialized: DATABASE_URL is empty")
+		log.Warn("PostgreSQL not initialized: DATABASE_URL is empty")
 		return nil, nil
 	}
 
-	log.Println("database connected")
+	log.Info("database connected")
 	return pool, pool.Close
 }
 
 func setupRedis(cfg *config.Config) (*cache.RedisCache, func()) {
+	log := logger.L()
 	redisCache, err := cache.NewRedisCache(cfg)
 	if err != nil {
-		log.Printf("Redis not initialized: %v", err)
+		log.Warn("Redis not initialized", zap.Error(err))
 		return nil, nil
 	}
 	if redisCache == nil {
-		log.Println("Redis not initialized: REDIS_ADDR is empty")
+		log.Warn("Redis not initialized: REDIS_ADDR is empty")
 		return nil, nil
 	}
 
@@ -124,7 +132,7 @@ func setupRedis(cfg *config.Config) (*cache.RedisCache, func()) {
 	defer cancel()
 
 	if err := redisCache.Set(ctx, "cache:startup:ping", "pong", time.Minute); err != nil {
-		log.Printf("Redis SET failed: %v", err)
+		log.Warn("Redis SET failed", zap.Error(err))
 		return redisCache, func() {
 			_ = redisCache.Close()
 		}
@@ -132,34 +140,35 @@ func setupRedis(cfg *config.Config) (*cache.RedisCache, func()) {
 
 	value, err := redisCache.Get(ctx, "cache:startup:ping")
 	if err != nil {
-		log.Printf("Redis GET failed: %v", err)
+		log.Warn("Redis GET failed", zap.Error(err))
 		return redisCache, func() {
 			_ = redisCache.Close()
 		}
 	}
 
-	log.Printf("Redis cache verified, value=%s", value)
+	log.Info("Redis cache verified", zap.String("value", value))
 	return redisCache, func() {
 		_ = redisCache.Close()
 	}
 }
 
 func setupResumeStorage(cfg *config.Config) domain.ResumeFileStorage {
+	log := logger.L()
 	resumeStorage, err := storage.NewSupabaseResumeStorage(cfg)
 	if err != nil {
-		log.Printf("Supabase resume storage not initialized: %v", err)
+		log.Warn("Supabase resume storage not initialized", zap.Error(err))
 	} else if resumeStorage != nil {
-		log.Println("Resume storage initialized: supabase")
+		log.Info("Resume storage initialized", zap.String("provider", "supabase"))
 		return resumeStorage
 	}
 
 	resumeStorage, err = storage.NewMinIOResumeStorage(cfg)
 	if err != nil {
-		log.Printf("MinIO resume storage not initialized: %v", err)
+		log.Warn("MinIO resume storage not initialized", zap.Error(err))
 		return nil
 	}
 	if resumeStorage != nil {
-		log.Println("Resume storage initialized: minio")
+		log.Info("Resume storage initialized", zap.String("provider", "minio"))
 	}
 
 	return resumeStorage
@@ -180,7 +189,11 @@ func startIdleSessionSweeper(cfg *config.Config, interviewUC domain.InterviewUse
 		sweepInterval = 30 * time.Second
 	}
 
-	log.Printf("Idle session sweeper started (timeout=%s, interval=%s)", idleTimeout, sweepInterval)
+	log := logger.L()
+	log.Info("Idle session sweeper started",
+		zap.Duration("timeout", idleTimeout),
+		zap.Duration("interval", sweepInterval),
+	)
 
 	go func() {
 		ticker := time.NewTicker(sweepInterval)
@@ -189,12 +202,12 @@ func startIdleSessionSweeper(cfg *config.Config, interviewUC domain.InterviewUse
 		for range ticker.C {
 			abandonedCount, err := interviewUC.AbandonIdleSessions(idleTimeout)
 			if err != nil {
-				log.Printf("Idle session sweeper error: %v", err)
+				log.Error("Idle session sweeper error", zap.Error(err))
 				continue
 			}
 
 			if abandonedCount > 0 {
-				log.Printf("Idle session sweeper abandoned %d sessions", abandonedCount)
+				log.Info("Idle session sweeper abandoned sessions", zap.Int64("count", abandonedCount))
 			}
 		}
 	}()

@@ -2,11 +2,12 @@ package notification
 
 import (
 	"fmt"
-	"log"
 	"net/smtp"
 	"strings"
 
 	"github.com/interview_app/backend/config"
+	"github.com/interview_app/backend/internal/logger"
+	"go.uber.org/zap"
 )
 
 type otpEmailSender interface {
@@ -66,6 +67,6 @@ func (s *smtpOTPSender) SendRegistrationOTP(email, otp string) error {
 }
 
 func (s *logOTPSender) SendRegistrationOTP(email, otp string) error {
-	log.Printf("OTP delivery fallback (SMTP not configured): email=%s otp=%s", email, otp)
+	logger.L().Info("[notification] OTP delivery fallback (SMTP not configured)", zap.String("email", email), zap.String("otp", otp))
 	return nil
 }

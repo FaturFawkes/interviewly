@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/interview_app/backend/config"
+	"github.com/interview_app/backend/internal/logger"
+	"go.uber.org/zap"
 )
 
 type Service struct {
@@ -117,6 +119,13 @@ func (s *Service) GetReviewAgentSignedURL(includeConversationID bool) (*AgentSig
 }
 
 func (s *Service) getAgentSignedURL(agentID, branchID string, includeConversationID bool) (*AgentSignedURLResult, error) {
+	log := logger.L()
+	log.Info("[voice] requesting agent signed URL",
+		zap.String("agentID", agentID),
+		zap.String("branchID", branchID),
+		zap.Bool("includeConversationID", includeConversationID),
+	)
+
 	queryValues := url.Values{}
 	queryValues.Set("agent_id", strings.TrimSpace(agentID))
 	if includeConversationID {
@@ -137,6 +146,7 @@ func (s *Service) getAgentSignedURL(agentID, branchID string, includeConversatio
 
 	response, err := s.client.Do(request)
 	if err != nil {
+		log.Error("[voice] agent signed URL request failed", zap.Error(err))
 		return nil, err
 	}
 	defer response.Body.Close()
@@ -147,6 +157,10 @@ func (s *Service) getAgentSignedURL(agentID, branchID string, includeConversatio
 	}
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		log.Error("[voice] agent signed URL error",
+			zap.Int("status", response.StatusCode),
+			zap.String("body", strings.TrimSpace(string(responseBody))),
+		)
 		return nil, fmt.Errorf("elevenlabs agent signed-url error: %s", strings.TrimSpace(string(responseBody)))
 	}
 
@@ -159,6 +173,7 @@ func (s *Service) getAgentSignedURL(agentID, branchID string, includeConversatio
 		return nil, fmt.Errorf("elevenlabs agent signed-url response is empty")
 	}
 
+	log.Info("[voice] agent signed URL obtained", zap.String("conversationID", parsed.ConversationID))
 	return &parsed, nil
 }
 
@@ -166,6 +181,13 @@ func (s *Service) TextToSpeech(text string) ([]byte, error) {
 	if !s.IsReady() {
 		return nil, fmt.Errorf("elevenlabs is not configured")
 	}
+
+	log := logger.L()
+	log.Info("[voice] TTS request",
+		zap.String("model", s.ttsModel),
+		zap.String("voiceID", s.voiceID),
+		zap.Int("textLen", len(text)),
+	)
 
 	payload := map[string]any{
 		"text":     text,
@@ -188,6 +210,7 @@ func (s *Service) TextToSpeech(text string) ([]byte, error) {
 
 	response, err := s.client.Do(request)
 	if err != nil {
+		log.Error("[voice] TTS request failed", zap.Error(err))
 		return nil, err
 	}
 	defer response.Body.Close()
@@ -198,9 +221,11 @@ func (s *Service) TextToSpeech(text string) ([]byte, error) {
 	}
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		log.Error("[voice] TTS error", zap.Int("status", response.StatusCode), zap.String("body", string(responseBody)))
 		return nil, fmt.Errorf("elevenlabs tts error: %s", string(responseBody))
 	}
 
+	log.Info("[voice] TTS success", zap.Int("audioBytes", len(responseBody)))
 	return responseBody, nil
 }
 
@@ -208,6 +233,13 @@ func (s *Service) SpeechToText(audio []byte, fileName string) (*STTResult, error
 	if !s.IsReady() {
 		return nil, fmt.Errorf("elevenlabs is not configured")
 	}
+
+	log := logger.L()
+	log.Info("[voice] STT request",
+		zap.String("model", s.sttModel),
+		zap.String("fileName", fileName),
+		zap.Int("audioBytes", len(audio)),
+	)
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
@@ -247,6 +279,7 @@ func (s *Service) SpeechToText(audio []byte, fileName string) (*STTResult, error
 	}
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		log.Error("[voice] STT error", zap.Int("status", response.StatusCode), zap.String("body", string(responseBody)))
 		return nil, fmt.Errorf("elevenlabs stt error: %s", string(responseBody))
 	}
 
@@ -255,6 +288,7 @@ func (s *Service) SpeechToText(audio []byte, fileName string) (*STTResult, error
 		return nil, err
 	}
 
+	log.Info("[voice] STT success", zap.Int("textLen", len(parsed.Text)))
 	return &parsed, nil
 }
 
