@@ -14,14 +14,15 @@ import (
 )
 
 type authUseCase struct {
-	repo       domain.AuthRepository
-	otpSender  otpSender
-	jwtSecret  string
-	jwtIssuer  string
-	tokenTTL   time.Duration
-	otpTTL     time.Duration
-	resendTTL  time.Duration
-	nowFactory func() time.Time
+	repo            domain.AuthRepository
+	otpSender       otpSender
+	jwtSecret       string
+	jwtIssuer       string
+	tokenTTL        time.Duration
+	otpTTL          time.Duration
+	resendTTL       time.Duration
+	refreshTokenTTL time.Duration
+	nowFactory      func() time.Time
 }
 
 type otpSender interface {
@@ -29,23 +30,27 @@ type otpSender interface {
 }
 
 // NewAuthUseCase creates a use case for authentication workflows.
-func NewAuthUseCase(repo domain.AuthRepository, sender otpSender, jwtSecret, jwtIssuer string, tokenTTL, otpTTL time.Duration) domain.AuthUseCase {
+func NewAuthUseCase(repo domain.AuthRepository, sender otpSender, jwtSecret, jwtIssuer string, tokenTTL, otpTTL, refreshTokenTTL time.Duration) domain.AuthUseCase {
 	if tokenTTL <= 0 {
-		tokenTTL = 24 * time.Hour
+		tokenTTL = time.Hour
 	}
 	if otpTTL <= 0 {
 		otpTTL = 10 * time.Minute
 	}
+	if refreshTokenTTL <= 0 {
+		refreshTokenTTL = 24 * time.Hour
+	}
 
 	return &authUseCase{
-		repo:       repo,
-		otpSender:  sender,
-		jwtSecret:  strings.TrimSpace(jwtSecret),
-		jwtIssuer:  strings.TrimSpace(jwtIssuer),
-		tokenTTL:   tokenTTL,
-		otpTTL:     otpTTL,
-		resendTTL:  5 * time.Minute,
-		nowFactory: time.Now,
+		repo:            repo,
+		otpSender:       sender,
+		jwtSecret:       strings.TrimSpace(jwtSecret),
+		jwtIssuer:       strings.TrimSpace(jwtIssuer),
+		tokenTTL:        tokenTTL,
+		otpTTL:          otpTTL,
+		resendTTL:       5 * time.Minute,
+		refreshTokenTTL: refreshTokenTTL,
+		nowFactory:      time.Now,
 	}
 }
 
@@ -263,12 +268,95 @@ func (uc *authUseCase) buildAuthResult(user *domain.User, provider string) (*dom
 		return nil, err
 	}
 
+	refreshTokenValue, err := uc.generateRefreshToken(user.ID, now)
+	if err != nil {
+		return nil, err
+	}
+
 	return &domain.AuthResult{
-		AccessToken: tokenValue,
-		TokenType:   "Bearer",
-		ExpiresIn:   int64(uc.tokenTTL.Seconds()),
-		User:        *user,
+		AccessToken:           tokenValue,
+		TokenType:             "Bearer",
+		ExpiresIn:             int64(uc.tokenTTL.Seconds()),
+		RefreshToken:          refreshTokenValue,
+		RefreshTokenExpiresIn: int64(uc.refreshTokenTTL.Seconds()),
+		User:                  *user,
 	}, nil
+}
+
+func (uc *authUseCase) generateRefreshToken(userID string, now time.Time) (string, error) {
+	if err := uc.repo.DeleteRefreshTokenByUserID(userID); err != nil {
+		return "", err
+	}
+
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	tokenSecret := fmt.Sprintf("%x", buf)
+	tokenValue := userID + "." + tokenSecret
+
+	tokenHash, err := bcrypt.GenerateFromPassword([]byte(tokenSecret), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+
+	err = uc.repo.SaveRefreshToken(domain.RefreshTokenRecord{
+		UserID:    userID,
+		TokenHash: string(tokenHash),
+		ExpiresAt: now.Add(uc.refreshTokenTTL),
+		CreatedAt: now,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return tokenValue, nil
+}
+
+func (uc *authUseCase) Refresh(input domain.RefreshInput) (*domain.AuthResult, error) {
+	if uc.jwtSecret == "" {
+		return nil, errors.New("jwt secret is not configured")
+	}
+
+	refreshToken := strings.TrimSpace(input.RefreshToken)
+	if refreshToken == "" {
+		return nil, errors.New("refresh token is required")
+	}
+
+	parts := strings.SplitN(refreshToken, ".", 2)
+	if len(parts) != 2 {
+		return nil, errors.New("invalid refresh token")
+	}
+	userID := parts[0]
+	tokenSecret := parts[1]
+
+	record, err := uc.repo.GetRefreshTokenByUserID(userID)
+	if err != nil {
+		return nil, err
+	}
+	if record == nil {
+		return nil, errors.New("invalid refresh token")
+	}
+
+	now := uc.nowFactory().UTC()
+	if now.After(record.ExpiresAt) {
+		_ = uc.repo.DeleteRefreshTokenByUserID(userID)
+		return nil, errors.New("refresh token expired")
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(record.TokenHash), []byte(tokenSecret)); err != nil {
+		return nil, errors.New("invalid refresh token")
+	}
+
+	user, err := uc.repo.GetUserByID(userID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, errors.New("user not found")
+	}
+
+	return uc.buildAuthResult(user, "refresh")
 }
 
 func generateOTPCode(length int) (string, error) {

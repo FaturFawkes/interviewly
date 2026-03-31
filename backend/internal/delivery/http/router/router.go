@@ -32,6 +32,7 @@ func Setup(
 	r.POST("/auth/register/verify", authHandler.VerifyRegisterOTP)
 	r.POST("/auth/login", authHandler.Login)
 	r.POST("/auth/social-login", authHandler.SocialLogin)
+	r.POST("/auth/refresh", authHandler.RefreshToken)
 	r.POST("/payments/checkout", paymentHandler.CreateCheckoutSession)
 	r.POST("/payments/webhook/stripe", paymentHandler.HandleStripeWebhook)
 

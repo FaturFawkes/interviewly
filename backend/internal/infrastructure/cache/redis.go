@@ -54,6 +54,10 @@ func (r *RedisCache) Expire(ctx context.Context, key string, ttl time.Duration) 
 	return r.client.Expire(ctx, key, ttl).Err()
 }
 
+func (r *RedisCache) Del(ctx context.Context, key string) error {
+	return r.client.Del(ctx, key).Err()
+}
+
 func (r *RedisCache) Close() error {
 	return r.client.Close()
 }

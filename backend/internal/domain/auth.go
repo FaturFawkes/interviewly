@@ -94,10 +94,26 @@ type VerifyRegisterOTPResult struct {
 
 // AuthResult is returned by auth workflows.
 type AuthResult struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int64  `json:"expires_in"`
-	User        User   `json:"user"`
+	AccessToken           string `json:"access_token"`
+	TokenType             string `json:"token_type"`
+	ExpiresIn             int64  `json:"expires_in"`
+	RefreshToken          string `json:"refresh_token"`
+	RefreshTokenExpiresIn int64  `json:"refresh_token_expires_in"`
+	User                  User   `json:"user"`
+}
+
+// RefreshTokenRecord stores a hashed refresh token for a user.
+type RefreshTokenRecord struct {
+	ID        string
+	UserID    string
+	TokenHash string
+	ExpiresAt time.Time
+	CreatedAt time.Time
+}
+
+// RefreshInput is the payload to refresh tokens.
+type RefreshInput struct {
+	RefreshToken string `json:"refresh_token"`
 }
 
 // AuthRepository defines persistence required by authentication workflows.
@@ -108,6 +124,10 @@ type AuthRepository interface {
 	SaveRegistrationOTP(record RegistrationOTP) error
 	GetRegistrationOTP(email string) (*RegistrationOTP, error)
 	DeleteRegistrationOTP(email string) error
+	SaveRefreshToken(record RefreshTokenRecord) error
+	GetRefreshTokenByUserID(userID string) (*RefreshTokenRecord, error)
+	DeleteRefreshTokenByUserID(userID string) error
+	GetUserByID(userID string) (*User, error)
 }
 
 // AuthUseCase defines authentication workflows.
@@ -117,4 +137,5 @@ type AuthUseCase interface {
 	ResendRegisterOTP(input ResendRegisterOTPInput) (*RegisterOTPResult, error)
 	VerifyRegisterOTP(input VerifyRegisterOTPInput) (*VerifyRegisterOTPResult, error)
 	Login(input LoginInput) (*AuthResult, error)
+	Refresh(input RefreshInput) (*AuthResult, error)
 }

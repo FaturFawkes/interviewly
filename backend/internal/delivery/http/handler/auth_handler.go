@@ -34,6 +34,10 @@ type loginRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
 // AuthHandler handles authentication APIs.
 type AuthHandler struct {
 	authUC domain.AuthUseCase
@@ -148,6 +152,23 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		Email:    req.Email,
 		Password: req.Password,
 	})
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// RefreshToken handles POST /auth/refresh.
+func (h *AuthHandler) RefreshToken(c *gin.Context) {
+	var req refreshRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.authUC.Refresh(domain.RefreshInput{RefreshToken: req.RefreshToken})
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return

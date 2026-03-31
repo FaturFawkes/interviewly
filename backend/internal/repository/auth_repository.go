@@ -3,32 +3,51 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/interview_app/backend/internal/domain"
+	"github.com/interview_app/backend/internal/infrastructure/cache"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type authRepository struct {
-	pool         *pgxpool.Pool
-	mu           sync.RWMutex
-	users        map[string]domain.User
-	credentials  map[string]string
-	registerOTPs map[string]domain.RegistrationOTP
+const refreshTokenCachePrefix = "auth:rt:"
+
+type cacheClient interface {
+	Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error
+	Get(ctx context.Context, key string) (string, error)
+	Del(ctx context.Context, key string) error
 }
 
-// NewAuthRepository creates auth repository with postgres support and in-memory fallback.
-func NewAuthRepository(pool *pgxpool.Pool) domain.AuthRepository {
+type authRepository struct {
+	pool          *pgxpool.Pool
+	cache         cacheClient
+	mu            sync.RWMutex
+	users         map[string]domain.User
+	credentials   map[string]string
+	registerOTPs  map[string]domain.RegistrationOTP
+	refreshTokens map[string]domain.RefreshTokenRecord
+}
+
+// NewAuthRepository creates auth repository with postgres and optional Redis cache.
+func NewAuthRepository(pool *pgxpool.Pool, rc *cache.RedisCache) domain.AuthRepository {
+	var c cacheClient
+	if rc != nil {
+		c = rc
+	}
 	return &authRepository{
-		pool:         pool,
-		users:        make(map[string]domain.User),
-		credentials:  make(map[string]string),
-		registerOTPs: make(map[string]domain.RegistrationOTP),
+		pool:          pool,
+		cache:         c,
+		users:         make(map[string]domain.User),
+		credentials:   make(map[string]string),
+		registerOTPs:  make(map[string]domain.RegistrationOTP),
+		refreshTokens: make(map[string]domain.RefreshTokenRecord),
 	}
 }
 
@@ -296,4 +315,178 @@ func (r *authRepository) DeleteRegistrationOTP(email string) error {
 
 	delete(r.registerOTPs, normalizedEmail)
 	return nil
+}
+
+func (r *authRepository) SaveRefreshToken(record domain.RefreshTokenRecord) error {
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := r.pool.Exec(
+			ctx,
+			`INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
+			 VALUES ($1::uuid, $2, $3)
+			 ON CONFLICT DO NOTHING`,
+			record.UserID,
+			record.TokenHash,
+			record.ExpiresAt,
+		)
+		if err != nil {
+			return err
+		}
+	} else {
+		r.mu.Lock()
+		r.refreshTokens[record.UserID] = record
+		r.mu.Unlock()
+	}
+
+	if r.cache != nil {
+		ttl := time.Until(record.ExpiresAt)
+		if ttl > 0 {
+			val := fmt.Sprintf("%s|%d", record.TokenHash, record.ExpiresAt.Unix())
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = r.cache.Set(ctx, refreshTokenCachePrefix+record.UserID, val, ttl)
+		}
+	}
+
+	return nil
+}
+
+func (r *authRepository) GetRefreshTokenByUserID(userID string) (*domain.RefreshTokenRecord, error) {
+	// 1. Redis-first
+	if r.cache != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		val, err := r.cache.Get(ctx, refreshTokenCachePrefix+userID)
+		cancel()
+		if err == nil && val != "" {
+			parts := strings.SplitN(val, "|", 2)
+			if len(parts) == 2 {
+				expiresAtUnix, parseErr := strconv.ParseInt(parts[1], 10, 64)
+				if parseErr == nil {
+					expiresAt := time.Unix(expiresAtUnix, 0).UTC()
+					if time.Now().UTC().Before(expiresAt) {
+						return &domain.RefreshTokenRecord{
+							UserID:    userID,
+							TokenHash: parts[0],
+							ExpiresAt: expiresAt,
+						}, nil
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Database fallback
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var record domain.RefreshTokenRecord
+		err := r.pool.QueryRow(
+			ctx,
+			`SELECT id::text, user_id::text, token_hash, expires_at, created_at
+			   FROM refresh_tokens
+			  WHERE user_id = $1::uuid
+			  ORDER BY created_at DESC
+			  LIMIT 1`,
+			userID,
+		).Scan(
+			&record.ID,
+			&record.UserID,
+			&record.TokenHash,
+			&record.ExpiresAt,
+			&record.CreatedAt,
+		)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, nil
+			}
+			return nil, err
+		}
+
+		// Populate Redis on cache miss
+		if r.cache != nil {
+			ttl := time.Until(record.ExpiresAt)
+			if ttl > 0 {
+				val := fmt.Sprintf("%s|%d", record.TokenHash, record.ExpiresAt.Unix())
+				cCtx, cCancel := context.WithTimeout(context.Background(), 2*time.Second)
+				_ = r.cache.Set(cCtx, refreshTokenCachePrefix+userID, val, ttl)
+				cCancel()
+			}
+		}
+
+		return &record, nil
+	}
+
+	// 3. In-memory fallback
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	record, exists := r.refreshTokens[userID]
+	if !exists {
+		return nil, nil
+	}
+	cp := record
+	return &cp, nil
+}
+
+func (r *authRepository) DeleteRefreshTokenByUserID(userID string) error {
+	// Delete from Redis first (fire-and-forget)
+	if r.cache != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = r.cache.Del(ctx, refreshTokenCachePrefix+userID)
+		cancel()
+	}
+
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := r.pool.Exec(ctx, `DELETE FROM refresh_tokens WHERE user_id = $1::uuid`, userID)
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.refreshTokens, userID)
+	return nil
+}
+
+func (r *authRepository) GetUserByID(userID string) (*domain.User, error) {
+	if r.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var user domain.User
+		err := r.pool.QueryRow(
+			ctx,
+			`SELECT id::text, email, COALESCE(full_name, ''), created_at, updated_at
+			   FROM users
+			  WHERE id = $1::uuid`,
+			userID,
+		).Scan(
+			&user.ID,
+			&user.Email,
+			&user.FullName,
+			&user.CreatedAt,
+			&user.UpdatedAt,
+		)
+		if err == nil {
+			return &user, nil
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, u := range r.users {
+		if u.ID == userID {
+			cp := u
+			return &cp, nil
+		}
+	}
+	return nil, nil
 }

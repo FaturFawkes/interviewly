@@ -17,6 +17,9 @@ function getBackendAuthUrl(): string {
 
 type BackendAuthResponse = {
   access_token: string;
+  expires_in: number;
+  refresh_token: string;
+  refresh_token_expires_in: number;
   user: {
     id: string;
     email: string;
@@ -32,9 +35,7 @@ async function exchangeSocialLogin(payload: {
 }): Promise<BackendAuthResponse> {
   const response = await fetch(`${getBackendAuthUrl()}/auth/social-login`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       provider: payload.provider,
       provider_account_id: payload.providerAccountID,
@@ -57,18 +58,28 @@ async function exchangePasswordAuth(payload: {
 }): Promise<BackendAuthResponse> {
   const response = await fetch(`${getBackendAuthUrl()}/auth/login`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      email: payload.email,
-      password: payload.password,
-    }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: payload.email, password: payload.password }),
     cache: "no-store",
   });
 
   if (!response.ok) {
     throw new Error("invalid credentials or registration failed");
+  }
+
+  return (await response.json()) as BackendAuthResponse;
+}
+
+async function refreshBackendToken(refreshToken: string): Promise<BackendAuthResponse> {
+  const response = await fetch(`${getBackendAuthUrl()}/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("failed to refresh token");
   }
 
   return (await response.json()) as BackendAuthResponse;
@@ -100,16 +111,15 @@ export const authOptions: NextAuthOptions = {
         }
 
         try {
-          const result = await exchangePasswordAuth({
-            email,
-            password,
-          });
+          const result = await exchangePasswordAuth({ email, password });
 
           return {
             id: result.user.id,
             email: result.user.email,
             name: result.user.full_name,
             backendAccessToken: result.access_token,
+            backendRefreshToken: result.refresh_token,
+            accessTokenExpiry: Math.floor(Date.now() / 1000) + result.expires_in,
           };
         } catch {
           return null;
@@ -119,24 +129,42 @@ export const authOptions: NextAuthOptions = {
   ],
   session: {
     strategy: "jwt",
+    maxAge: 24 * 60 * 60, // 24 hours — matches refresh token TTL
   },
   callbacks: {
     async jwt({ token, account, profile, user }) {
+      // Initial sign in via credentials
       if (account?.provider === "credentials") {
-        const credentialUser = user as { backendAccessToken?: string; id?: string } | undefined;
+        const credentialUser = user as {
+          backendAccessToken?: string;
+          backendRefreshToken?: string;
+          accessTokenExpiry?: number;
+          id?: string;
+        } | undefined;
+
         if (typeof credentialUser?.backendAccessToken === "string") {
           token.backendAccessToken = credentialUser.backendAccessToken;
+        }
+        if (typeof credentialUser?.backendRefreshToken === "string") {
+          token.backendRefreshToken = credentialUser.backendRefreshToken;
+        }
+        if (typeof credentialUser?.accessTokenExpiry === "number") {
+          token.accessTokenExpiry = credentialUser.accessTokenExpiry;
         }
         if (typeof credentialUser?.id === "string") {
           token.userId = credentialUser.id;
         }
+        return token;
       }
 
+      // Initial sign in via social provider
       if (account?.provider === "google" || account?.provider === "azure-ad") {
         const provider = account.provider === "google" ? "google" : "microsoft";
         const email = typeof token.email === "string" ? token.email : "";
         const profileName =
-          profile && typeof profile === "object" && "name" in profile && typeof profile.name === "string" ? profile.name : "";
+          profile && typeof profile === "object" && "name" in profile && typeof profile.name === "string"
+            ? profile.name
+            : "";
         const fullName = (typeof token.name === "string" && token.name) || profileName;
         const providerAccountID = account.providerAccountId;
 
@@ -150,12 +178,43 @@ export const authOptions: NextAuthOptions = {
             });
 
             token.backendAccessToken = exchanged.access_token;
+            token.backendRefreshToken = exchanged.refresh_token;
+            token.accessTokenExpiry = Math.floor(Date.now() / 1000) + exchanged.expires_in;
             token.userId = exchanged.user.id;
             delete token.authError;
           } catch {
             token.authError = "Failed to sign in with backend";
           }
         }
+        return token;
+      }
+
+      // Subsequent calls — check if access token needs refresh
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const expiry = typeof token.accessTokenExpiry === "number" ? token.accessTokenExpiry : 0;
+
+      // Still valid if more than 5 minutes remain
+      if (expiry > 0 && nowSeconds < expiry - 300) {
+        return token;
+      }
+
+      const refreshToken = typeof token.backendRefreshToken === "string" ? token.backendRefreshToken : "";
+      if (!refreshToken) {
+        token.authError = "Session expired, please sign in again";
+        return token;
+      }
+
+      try {
+        const refreshed = await refreshBackendToken(refreshToken);
+        token.backendAccessToken = refreshed.access_token;
+        token.backendRefreshToken = refreshed.refresh_token;
+        token.accessTokenExpiry = Math.floor(Date.now() / 1000) + refreshed.expires_in;
+        if (refreshed.user?.id) {
+          token.userId = refreshed.user.id;
+        }
+        delete token.authError;
+      } catch {
+        token.authError = "Session expired, please sign in again";
       }
 
       return token;
