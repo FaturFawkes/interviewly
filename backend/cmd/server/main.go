@@ -67,7 +67,7 @@ func main() {
 	meHandler := handler.NewMeHandler()
 	authRepo := repository.NewAuthRepository(postgresPool, redisCache)
 	otpSender := notification.NewRegistrationOTPSender(cfg)
-	authUC := usecase.NewAuthUseCase(authRepo, otpSender, cfg.JWTSecret, cfg.JWTIssuer, time.Hour, time.Duration(cfg.OTPExpiryMinutes)*time.Minute, 24*time.Hour)
+	authUC := usecase.NewAuthUseCase(authRepo, otpSender, cfg.JWTSecret, cfg.JWTIssuer, time.Duration(cfg.AccessTokenTTLMinutes)*time.Minute, time.Duration(cfg.OTPExpiryMinutes)*time.Minute, time.Duration(cfg.RefreshTokenTTLHours)*time.Hour)
 	authHandler := handler.NewAuthHandler(authUC)
 	authMiddleware := middleware.AuthMiddleware(cfg)
 	rateLimitMiddleware := middleware.RateLimitMiddleware(redisCache, cfg.SubscriptionRateLimitPerMinute, time.Minute)

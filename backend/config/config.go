@@ -26,6 +26,8 @@ type Config struct {
 	SMTPFromEmail                       string
 	SMTPFromName                        string
 	OTPExpiryMinutes                    int
+	AccessTokenTTLMinutes               int
+	RefreshTokenTTLHours                int
 	AIProvider                          string
 	AIModel                             string
 	AIModelFUPDowngrade                 string
@@ -93,6 +95,8 @@ func Load() *Config {
 		SMTPFromEmail:                       getEnv("SMTP_FROM_EMAIL", "no-reply@interviewly.local"),
 		SMTPFromName:                        getEnv("SMTP_FROM_NAME", "Interviewly"),
 		OTPExpiryMinutes:                    getEnvInt("OTP_EXPIRY_MINUTES", 10),
+		AccessTokenTTLMinutes:               getEnvInt("ACCESS_TOKEN_TTL_MINUTES", 60),
+		RefreshTokenTTLHours:                getEnvInt("REFRESH_TOKEN_TTL_HOURS", 24),
 		AIProvider:                          strings.ToLower(getEnv("AI_PROVIDER", "local")),
 		AIModel:                             getEnv("AI_MODEL", "gpt-4o-mini"),
 		AIModelFUPDowngrade:                 getEnv("AI_MODEL_FUP_DOWNGRADE", ""),
